@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -42,6 +42,12 @@ class Diagonal
       public ConvertibleTo<Csr<ValueType, int32>>,
       public ConvertibleTo<Csr<ValueType, int64>>,
       public ConvertibleTo<Diagonal<next_precision<ValueType>>>,
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Diagonal<next_precision<ValueType, 2>>>,
+#endif
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Diagonal<next_precision<ValueType, 3>>>,
+#endif
       public Transposable,
       public WritableToMatrixData<ValueType, int32>,
       public WritableToMatrixData<ValueType, int64>,
@@ -71,7 +77,7 @@ public:
     using device_mat_data32 = device_matrix_data<ValueType, int32>;
     using absolute_type = remove_complex<Diagonal>;
 
-    friend class Diagonal<next_precision<ValueType>>;
+    friend class Diagonal<previous_precision<ValueType>>;
 
     std::unique_ptr<LinOp> transpose() const override;
 
@@ -80,6 +86,28 @@ public:
     void convert_to(Diagonal<next_precision<ValueType>>* result) const override;
 
     void move_to(Diagonal<next_precision<ValueType>>* result) override;
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+    friend class Diagonal<previous_precision<ValueType, 2>>;
+    using ConvertibleTo<Diagonal<next_precision<ValueType, 2>>>::convert_to;
+    using ConvertibleTo<Diagonal<next_precision<ValueType, 2>>>::move_to;
+
+    void convert_to(
+        Diagonal<next_precision<ValueType, 2>>* result) const override;
+
+    void move_to(Diagonal<next_precision<ValueType, 2>>* result) override;
+#endif
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+    friend class Diagonal<previous_precision<ValueType, 3>>;
+    using ConvertibleTo<Diagonal<next_precision<ValueType, 3>>>::convert_to;
+    using ConvertibleTo<Diagonal<next_precision<ValueType, 3>>>::move_to;
+
+    void convert_to(
+        Diagonal<next_precision<ValueType, 3>>* result) const override;
+
+    void move_to(Diagonal<next_precision<ValueType, 3>>* result) override;
+#endif
 
     void convert_to(Csr<ValueType, int32>* result) const override;
 

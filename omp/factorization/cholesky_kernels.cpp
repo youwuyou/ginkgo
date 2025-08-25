@@ -1,17 +1,16 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/factorization/cholesky_kernels.hpp"
 
-
 #include <algorithm>
 #include <memory>
 
-
 #include <ginkgo/core/matrix/csr.hpp>
 
-
+#include "core/base/allocator.hpp"
+#include "core/base/index_range.hpp"
 #include "core/base/iterator_factory.hpp"
 #include "core/components/fill_array_kernels.hpp"
 #include "core/components/format_conversion_kernels.hpp"
@@ -134,49 +133,6 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
 
 
 template <typename ValueType, typename IndexType>
-void forest_from_factor(
-    std::shared_ptr<const DefaultExecutor> exec,
-    const matrix::Csr<ValueType, IndexType>* factors,
-    gko::factorization::elimination_forest<IndexType>& forest)
-{
-    const auto row_ptrs = factors->get_const_row_ptrs();
-    const auto col_idxs = factors->get_const_col_idxs();
-    const auto parents = forest.parents.get_data();
-    const auto children = forest.children.get_data();
-    const auto child_ptrs = forest.child_ptrs.get_data();
-    const auto num_rows = static_cast<IndexType>(factors->get_size()[0]);
-    components::fill_array(exec, parents, num_rows, num_rows);
-#pragma omp parallel for
-    for (IndexType l_col = 0; l_col < num_rows; l_col++) {
-        const auto llt_row_begin = row_ptrs[l_col];
-        const auto llt_row_end = row_ptrs[l_col + 1];
-        for (auto nz = llt_row_begin; nz < llt_row_end; nz++) {
-            const auto l_row = col_idxs[nz];
-            // parent[j] = min(i | i > j and l_ij =/= 0)
-            // we read from L^T stored above the diagonal in factors
-            // assuming a sorted order of the columns
-            if (l_row > l_col) {
-                parents[l_col] = l_row;
-                break;
-            }
-        }
-    }
-    // group by parent
-    array<IndexType> parents_copy{exec, static_cast<size_type>(num_rows)};
-    exec->copy(num_rows, parents, parents_copy.get_data());
-    components::fill_seq_array(exec, children, num_rows);
-    const auto it =
-        detail::make_zip_iterator(parents_copy.get_data(), children);
-    std::stable_sort(it, it + num_rows);
-    components::convert_idxs_to_ptrs(exec, parents_copy.get_const_data(),
-                                     num_rows, num_rows + 1, child_ptrs);
-}
-
-GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
-    GKO_DECLARE_CHOLESKY_FOREST_FROM_FACTOR);
-
-
-template <typename ValueType, typename IndexType>
 void initialize(std::shared_ptr<const DefaultExecutor> exec,
                 const matrix::Csr<ValueType, IndexType>* mtx,
                 const IndexType* factor_lookup_offsets,
@@ -207,14 +163,17 @@ void initialize(std::shared_ptr<const DefaultExecutor> exec,
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CHOLESKY_INITIALIZE);
 
 
-template <typename ValueType, typename IndexType>
-void factorize(std::shared_ptr<const DefaultExecutor> exec,
-               const IndexType* lookup_offsets, const int64* lookup_descs,
-               const int32* lookup_storage, const IndexType* diag_idxs,
-               const IndexType* transpose_idxs,
-               const factorization::elimination_forest<IndexType>& forest,
-               matrix::Csr<ValueType, IndexType>* factors,
-               array<int>& tmp_storage)
+namespace {
+
+
+template <bool full_fillin, typename ValueType, typename IndexType>
+void factorize_impl(std::shared_ptr<const DefaultExecutor> exec,
+                    const IndexType* lookup_offsets, const int64* lookup_descs,
+                    const int32* lookup_storage, const IndexType* diag_idxs,
+                    const IndexType* transpose_idxs,
+                    const factorization::elimination_forest<IndexType>& forest,
+                    matrix::Csr<ValueType, IndexType>* factors,
+                    array<int>& tmp_storage)
 {
     const auto num_rows = factors->get_size()[0];
     const auto row_ptrs = factors->get_const_row_ptrs();
@@ -236,8 +195,15 @@ void factorize(std::shared_ptr<const DefaultExecutor> exec,
                 const auto col = cols[dep_nz];
                 if (col < row) {
                     const auto val = vals[dep_nz];
-                    const auto nz = row_begin + lookup.lookup_unsafe(col);
-                    vals[nz] -= scale * val;
+                    if constexpr (full_fillin) {
+                        const auto nz = row_begin + lookup.lookup_unsafe(col);
+                        vals[nz] -= scale * val;
+                    } else {
+                        const auto idx = lookup[col];
+                        if (idx != invalid_index<IndexType>()) {
+                            vals[row_begin + idx] -= scale * val;
+                        }
+                    }
                 }
             }
         }
@@ -248,6 +214,30 @@ void factorize(std::shared_ptr<const DefaultExecutor> exec,
             vals[transpose_idxs[lower_nz]] = conj(vals[lower_nz]);
         }
         vals[row_diag] = sqrt(diag);
+    }
+}
+
+
+}  // namespace
+
+
+template <typename ValueType, typename IndexType>
+void factorize(std::shared_ptr<const DefaultExecutor> exec,
+               const IndexType* lookup_offsets, const int64* lookup_descs,
+               const int32* lookup_storage, const IndexType* diag_idxs,
+               const IndexType* transpose_idxs,
+               const factorization::elimination_forest<IndexType>& forest,
+               matrix::Csr<ValueType, IndexType>* factors, bool full_fillin,
+               array<int>& tmp_storage)
+{
+    if (full_fillin) {
+        factorize_impl<true>(exec, lookup_offsets, lookup_descs, lookup_storage,
+                             diag_idxs, transpose_idxs, forest, factors,
+                             tmp_storage);
+    } else {
+        factorize_impl<false>(exec, lookup_offsets, lookup_descs,
+                              lookup_storage, diag_idxs, transpose_idxs, forest,
+                              factors, tmp_storage);
     }
 }
 

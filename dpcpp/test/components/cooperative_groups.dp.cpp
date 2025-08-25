@@ -1,24 +1,19 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 
-
 #include <iostream>
 #include <memory>
 
-
-#include <CL/sycl.hpp>
-
-
 #include <gtest/gtest.h>
 
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/base/types.hpp>
-
 
 #include "core/base/types.hpp"
 #include "core/synthesizer/implementation_selection.hpp"
@@ -191,9 +186,11 @@ void cg_ballot(bool* s, sycl::nd_item<3> item_ct1)
     auto active = gko::detail::mask<sg_size, config::lane_mask_type>();
     auto i = int(group.thread_rank());
 
-    s[i] = group.ballot(false) == 0;
-    s[i + sg_size] = group.ballot(true) == (~config::lane_mask_type{} & active);
-    s[i + sg_size * 2] = group.ballot(item_ct1.get_local_id(2) < 4) == 0xf;
+    s[i] = group::ballot(group, false) == 0;
+    s[i + sg_size] =
+        group::ballot(group, true) == (~config::lane_mask_type{} & active);
+    s[i + sg_size * 2] =
+        group::ballot(group, item_ct1.get_local_id(2) < 4) == 0xf;
 }
 
 GKO_ENABLE_DEFAULT_HOST_CONFIG_TYPE(cg_ballot, cg_ballot)
@@ -201,6 +198,49 @@ GKO_ENABLE_IMPLEMENTATION_CONFIG_SELECTION_TOTYPE(cg_ballot, cg_ballot, DCFG_1D)
 GKO_ENABLE_DEFAULT_CONFIG_CALL(cg_ballot_call, cg_ballot, default_config_list)
 
 TEST_P(CooperativeGroups, Ballot) { test_all_subgroup(cg_ballot_call<bool*>); }
+
+
+template <typename cfg>
+void cg_communicator_categorization(bool* s, sycl::nd_item<3> item_ct1)
+{
+    auto this_block = group::this_thread_block(item_ct1);
+    auto tiled_partition =
+        group::tiled_partition<cfg::subgroup_size>(this_block);
+
+    using not_group = int;
+    using this_block_t = decltype(this_block);
+    using tiled_partition_t = decltype(tiled_partition);
+
+    static_assert(!group::is_group<not_group>::value &&
+                      group::is_group<this_block_t>::value &&
+                      group::is_group<tiled_partition_t>::value,
+                  "Group check doesn't work.");
+    static_assert(!group::is_synchronizable_group<not_group>::value &&
+                      group::is_synchronizable_group<this_block_t>::value &&
+                      group::is_synchronizable_group<tiled_partition_t>::value,
+                  "Synchronizable group check doesn't work.");
+    static_assert(!group::is_communicator_group<not_group>::value &&
+                      !group::is_communicator_group<this_block_t>::value &&
+                      group::is_communicator_group<tiled_partition_t>::value,
+                  "Communicator group check doesn't work.");
+    // Make it work with the test framework, which performs 3 tests
+    s[this_block.thread_rank()] = true;
+    s[this_block.thread_rank() + cfg::subgroup_size] = true;
+    s[this_block.thread_rank() + 2 * cfg::subgroup_size] = true;
+}
+
+GKO_ENABLE_DEFAULT_HOST_CONFIG_TYPE(cg_communicator_categorization,
+                                    cg_communicator_categorization)
+GKO_ENABLE_IMPLEMENTATION_CONFIG_SELECTION_TOTYPE(
+    cg_communicator_categorization, cg_communicator_categorization, DCFG_1D)
+GKO_ENABLE_DEFAULT_CONFIG_CALL(cg_communicator_categorization_call,
+                               cg_communicator_categorization,
+                               default_config_list)
+
+TEST_P(CooperativeGroups, CorrectCategorization)
+{
+    test_all_subgroup(cg_communicator_categorization_call<bool*>);
+}
 
 
 INSTANTIATE_TEST_SUITE_P(DifferentSubgroup, CooperativeGroups,

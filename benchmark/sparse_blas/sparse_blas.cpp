@@ -1,9 +1,6 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
-
-#include <ginkgo/ginkgo.hpp>
-
 
 #include <algorithm>
 #include <exception>
@@ -15,6 +12,7 @@
 #include <random>
 #include <typeinfo>
 
+#include <ginkgo/ginkgo.hpp>
 
 #include "benchmark/sparse_blas/operations.hpp"
 #include "benchmark/utils/general_matrix.hpp"
@@ -85,7 +83,7 @@ struct SparseBlasBenchmark : Benchmark<std::unique_ptr<Mtx>> {
     std::unique_ptr<Mtx> setup(std::shared_ptr<gko::Executor> exec,
                                json& test_case) const override
     {
-        auto data = Generator::generate_matrix_data(test_case);
+        auto [data, local_size] = Generator::generate_matrix_data(test_case);
         reorder(data, test_case);
         std::clog << "Matrix is of size (" << data.size[0] << ", "
                   << data.size[1] << "), " << data.nonzeros.size() << std::endl;
@@ -168,7 +166,7 @@ int main(int argc, char* argv[])
     auto test_cases = json::parse(get_input_stream());
 
     std::string extra_information = "The operations are " + FLAGS_operations;
-    print_general_information(extra_information);
+    print_general_information(extra_information, exec);
 
     run_test_cases(SparseBlasBenchmark{}, exec,
                    get_timer(exec, FLAGS_gpu_timer), test_cases);

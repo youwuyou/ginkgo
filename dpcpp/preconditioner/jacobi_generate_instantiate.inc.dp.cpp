@@ -1,24 +1,22 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include "core/preconditioner/jacobi_kernels.hpp"
-
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/config.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
 
-
 #include "core/base/extended_float.hpp"
 #include "core/components/fill_array_kernels.hpp"
+#include "core/preconditioner/jacobi_kernels.hpp"
 #include "core/preconditioner/jacobi_utils.hpp"
 #include "core/synthesizer/implementation_selection.hpp"
 #include "dpcpp/base/config.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
 #include "dpcpp/base/dpct.hpp"
+#include "dpcpp/base/math.hpp"
+#include "dpcpp/base/types.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/diagonal_block_manipulation.dp.hpp"
 #include "dpcpp/components/thread_ids.dp.hpp"
@@ -96,7 +94,7 @@ void generate(
     preconditioner::block_interleaved_storage_scheme<IndexType> storage_scheme,
     const IndexType* __restrict__ block_ptrs, size_type num_blocks,
     sycl::nd_item<3> item_ct1,
-    uninitialized_array<ValueType, max_block_size * warps_per_block>* workspace)
+    uninitialized_array<ValueType, max_block_size * warps_per_block>& workspace)
 {
     const auto block_id =
         thread::get_subwarp_id<subwarp_size, warps_per_block>(item_ct1);
@@ -106,7 +104,7 @@ void generate(
     csr::extract_transposed_diag_blocks<max_block_size, warps_per_block>(
         block, config::warp_size / subwarp_size, row_ptrs, col_idxs, values,
         block_ptrs, num_blocks, row, 1,
-        *workspace + item_ct1.get_local_id(0) * max_block_size, item_ct1);
+        &workspace[item_ct1.get_local_id(0) * max_block_size], item_ct1);
     const auto subwarp = group::tiled_partition<subwarp_size>(block);
     if (block_id < num_blocks) {
         const auto block_size = block_ptrs[block_id + 1] - block_ptrs[block_id];
@@ -142,7 +140,7 @@ void generate(
                     generate<max_block_size, subwarp_size, warps_per_block>(
                         num_rows, row_ptrs, col_idxs, values, block_data,
                         storage_scheme, block_ptrs, num_blocks, item_ct1,
-                        workspace_acc_ct1.get_pointer().get());
+                        *workspace_acc_ct1.get_pointer());
                 });
     });
 }
@@ -211,7 +209,7 @@ void adaptive_generate(
     precision_reduction* __restrict__ block_precisions,
     const IndexType* __restrict__ block_ptrs, size_type num_blocks,
     sycl::nd_item<3> item_ct1,
-    uninitialized_array<ValueType, max_block_size * warps_per_block>* workspace)
+    uninitialized_array<ValueType, max_block_size * warps_per_block>& workspace)
 {
     // extract blocks
     const auto block_id =
@@ -222,7 +220,7 @@ void adaptive_generate(
     csr::extract_transposed_diag_blocks<max_block_size, warps_per_block>(
         block, config::warp_size / subwarp_size, row_ptrs, col_idxs, values,
         block_ptrs, num_blocks, row, 1,
-        *workspace + item_ct1.get_local_id(0) * max_block_size, item_ct1);
+        &workspace[item_ct1.get_local_id(0) * max_block_size], item_ct1);
 
     // compute inverse and figure out the correct precision
     const auto subwarp = group::tiled_partition<subwarp_size>(block);
@@ -328,7 +326,7 @@ void adaptive_generate(
                                      accuracy, block_data, storage_scheme,
                                      conditioning, block_precisions, block_ptrs,
                                      num_blocks, item_ct1,
-                                     workspace_acc_ct1.get_pointer().get());
+                                     *workspace_acc_ct1.get_pointer());
                              });
     });
 }
@@ -369,14 +367,16 @@ void generate(syn::value_list<int, max_block_size>,
                                   warps_per_block>(
             grid_size, block_size, 0, exec->get_queue(), mtx->get_size()[0],
             mtx->get_const_row_ptrs(), mtx->get_const_col_idxs(),
-            mtx->get_const_values(), accuracy, block_data, storage_scheme,
-            conditioning, block_precisions, block_ptrs, num_blocks);
+            as_device_type(mtx->get_const_values()), as_device_type(accuracy),
+            as_device_type(block_data), storage_scheme,
+            as_device_type(conditioning), block_precisions, block_ptrs,
+            num_blocks);
     } else {
         kernel::generate<max_block_size, subwarp_size, warps_per_block>(
             grid_size, block_size, 0, exec->get_queue(), mtx->get_size()[0],
             mtx->get_const_row_ptrs(), mtx->get_const_col_idxs(),
-            mtx->get_const_values(), block_data, storage_scheme, block_ptrs,
-            num_blocks);
+            as_device_type(mtx->get_const_values()), as_device_type(block_data),
+            storage_scheme, block_ptrs, num_blocks);
     }
 }
 

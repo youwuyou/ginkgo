@@ -1,13 +1,11 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/matrix/coo.hpp>
-
+#include "ginkgo/core/matrix/coo.hpp"
 
 #include <algorithm>
 #include <numeric>
-
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -17,7 +15,6 @@
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/base/device_matrix_data_kernels.hpp"
 #include "core/components/absolute_array_kernels.hpp"
@@ -45,6 +42,8 @@ GKO_REGISTER_OPERATION(inplace_absolute_array,
 GKO_REGISTER_OPERATION(outplace_absolute_array,
                        components::outplace_absolute_array);
 GKO_REGISTER_OPERATION(aos_to_soa, components::aos_to_soa);
+GKO_REGISTER_OPERATION(sort_row_major, components::sort_row_major);
+GKO_REGISTER_OPERATION(conj_array, coo::conj_array);
 
 
 }  // anonymous namespace
@@ -234,6 +233,48 @@ void Coo<ValueType, IndexType>::move_to(
 }
 
 
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Coo<ValueType, IndexType>::convert_to(
+    Coo<next_precision<ValueType, 2>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->row_idxs_ = this->row_idxs_;
+    result->col_idxs_ = this->col_idxs_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Coo<ValueType, IndexType>::move_to(
+    Coo<next_precision<ValueType, 2>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Coo<ValueType, IndexType>::convert_to(
+    Coo<next_precision<ValueType, 3>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->row_idxs_ = this->row_idxs_;
+    result->col_idxs_ = this->col_idxs_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Coo<ValueType, IndexType>::move_to(
+    Coo<next_precision<ValueType, 3>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
 template <typename ValueType, typename IndexType>
 void Coo<ValueType, IndexType>::convert_to(
     Csr<ValueType, IndexType>* result) const
@@ -360,6 +401,27 @@ void Coo<ValueType, IndexType>::write(mat_data& data) const
     }
 }
 
+template <typename ValueType, typename IndexType>
+std::unique_ptr<LinOp> Coo<ValueType, IndexType>::transpose() const
+{
+    auto coo = this->clone();
+    std::swap(coo->row_idxs_, coo->col_idxs_);
+    auto size = this->get_size();
+    coo->set_size(dim<2>{size[1], size[0]});
+    coo->get_executor()->run(coo::make_sort_row_major(
+        coo->get_num_stored_elements(), coo->get_row_idxs(),
+        coo->get_col_idxs(), coo->get_values()));
+    return coo;
+}
+
+template <typename ValueType, typename IndexType>
+std::unique_ptr<LinOp> Coo<ValueType, IndexType>::conj_transpose() const
+{
+    auto coo = as<transposed_type>(this->transpose());
+    coo->get_executor()->run(coo::make_conj_array(
+        coo->get_num_stored_elements(), coo->get_values()));
+    return coo;
+}
 
 template <typename ValueType, typename IndexType>
 std::unique_ptr<Diagonal<ValueType>>

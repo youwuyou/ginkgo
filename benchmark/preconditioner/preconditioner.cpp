@@ -1,9 +1,6 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
-
-#include <ginkgo/ginkgo.hpp>
-
 
 #include <algorithm>
 #include <cstdlib>
@@ -11,6 +8,7 @@
 #include <iomanip>
 #include <iostream>
 
+#include <ginkgo/ginkgo.hpp>
 
 #include "benchmark/utils/formats.hpp"
 #include "benchmark/utils/general.hpp"
@@ -153,15 +151,15 @@ struct PreconditionerBenchmark : Benchmark<preconditioner_benchmark_state> {
                                          json& test_case) const override
     {
         preconditioner_benchmark_state state;
-        auto data = Generator::generate_matrix_data(test_case);
+        auto [data, local_size] = Generator::generate_matrix_data(test_case);
         reorder(data, test_case);
 
         state.system_matrix =
             formats::matrix_factory(FLAGS_formats, exec, data);
         state.b = Generator::create_multi_vector_random(
-            exec, gko::dim<2>{data.size[0]});
+            exec, gko::dim<2>{data.size[0]}, local_size);
         state.x = Generator::create_multi_vector(
-            exec, gko::dim<2>{data.size[0]}, gko::zero<etype>());
+            exec, gko::dim<2>{data.size[0]}, local_size, gko::zero<etype>());
 
         std::clog << "Matrix is of size (" << data.size[0] << ", "
                   << data.size[1] << "), " << data.nonzeros.size() << std::endl;
@@ -227,7 +225,6 @@ struct PreconditionerBenchmark : Benchmark<preconditioner_benchmark_state> {
             auto x_clone = clone(state.x);
             auto precond = precond_factory.at(decoded_precond_name)(exec);
 
-            std::unique_ptr<gko::LinOp> precond_op;
             {
                 auto gen_logger = create_operations_logger(
                     FLAGS_gpu_timer, FLAGS_nested_names, exec,
@@ -238,13 +235,16 @@ struct PreconditionerBenchmark : Benchmark<preconditioner_benchmark_state> {
                     exec->get_master()->add_logger(gen_logger);
                 }
                 for (auto i = 0u; i < ic_gen.get_num_repetitions(); ++i) {
-                    precond_op = precond->generate(state.system_matrix);
+                    auto precond_op = precond->generate(state.system_matrix);
                 }
                 if (exec->get_master() != exec) {
                     exec->get_master()->remove_logger(gen_logger);
                 }
                 exec->remove_logger(gen_logger);
             }
+
+            // generate it for apply usage
+            auto precond_op = precond->generate(state.system_matrix);
 
             auto apply_logger = create_operations_logger(
                 FLAGS_gpu_timer, FLAGS_nested_names, exec,
@@ -277,9 +277,9 @@ int main(int argc, char* argv[])
 
     std::string extra_information =
         "Running with preconditioners: " + FLAGS_preconditioners;
-    print_general_information(extra_information);
 
     auto exec = get_executor(FLAGS_gpu_timer);
+    print_general_information(extra_information, exec);
     auto& engine = get_engine();
 
     auto preconditioners = split(FLAGS_preconditioners, ',');

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -9,11 +9,9 @@
 #include <cstring>
 #include <type_traits>
 
-
 #include <ginkgo/core/base/math.hpp>
 
-
-#include "hip/base/types.hip.hpp"
+#include "common/cuda_hip/base/types.hpp"
 
 
 namespace gko {
@@ -101,7 +99,7 @@ __device__ __forceinline__ ValueType load_generic(const ValueType* ptr)
     auto cast_value = HIP_ATOMIC_LOAD(reinterpret_cast<const atomic_type*>(ptr),
                                       memorder, scope);
     ValueType result{};
-    std::memcpy(&result, &cast_value, sizeof(ValueType));
+    memcpy(&result, &cast_value, sizeof(ValueType));
     return result;
 }
 
@@ -124,9 +122,54 @@ __device__ __forceinline__ void store_generic(ValueType* ptr, ValueType value)
     static_assert(sizeof(atomic_type) == sizeof(ValueType), "invalid map");
     static_assert(alignof(atomic_type) == alignof(ValueType), "invalid map");
     atomic_type cast_value{};
-    std::memcpy(&cast_value, &value, sizeof(ValueType));
+    memcpy(&cast_value, &value, sizeof(ValueType));
     HIP_ATOMIC_STORE(reinterpret_cast<atomic_type*>(ptr), cast_value, memorder,
                      scope);
+}
+
+
+template <typename ValueType, typename AddType>
+__device__ __forceinline__ ValueType atomic_add_relaxed(ValueType* ptr,
+                                                        AddType value)
+{
+    return __atomic_fetch_add(ptr, value, __ATOMIC_RELAXED);
+}
+
+
+template <typename ValueType>
+__device__ __forceinline__ ValueType atomic_min_relaxed(ValueType* ptr,
+                                                        ValueType value)
+{
+    return __atomic_fetch_min(ptr, value, __ATOMIC_RELAXED);
+}
+
+
+template <typename ValueType>
+__device__ __forceinline__ ValueType atomic_max_relaxed(ValueType* ptr,
+                                                        ValueType value)
+{
+    return __atomic_fetch_max(ptr, value, __ATOMIC_RELAXED);
+}
+
+
+template <typename ValueType>
+__device__ __forceinline__ ValueType atomic_cas_relaxed(ValueType* ptr,
+                                                        ValueType old_val,
+                                                        ValueType new_val)
+{
+    __atomic_compare_exchange_n(ptr, &old_val, new_val, false, __ATOMIC_RELAXED,
+                                __ATOMIC_RELAXED);
+    return old_val;
+}
+
+
+template <typename ValueType>
+__device__ __forceinline__ ValueType atomic_cas_relaxed_local(ValueType* ptr,
+                                                              ValueType old_val,
+                                                              ValueType new_val)
+{
+    // no special optimization available for threadblock-local atomic CAS
+    return atomic_cas_relaxed(ptr, old_val, new_val);
 }
 
 

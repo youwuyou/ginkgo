@@ -1,18 +1,17 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include "core/factorization/par_ilut_kernels.hpp"
-
+#include "dpcpp/factorization/par_ilut_select_common.dp.hpp"
 
 #include <limits>
 
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include "core/components/prefix_sum_kernels.hpp"
+#include "core/factorization/par_ilut_kernels.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
+#include "dpcpp/base/math.hpp"
 #include "dpcpp/components/atomic.dp.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/intrinsics.dp.hpp"
@@ -20,7 +19,6 @@
 #include "dpcpp/components/searching.dp.hpp"
 #include "dpcpp/components/sorting.dp.hpp"
 #include "dpcpp/components/thread_ids.dp.hpp"
-#include "dpcpp/factorization/par_ilut_select_common.dp.hpp"
 
 
 namespace gko {

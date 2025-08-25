@@ -1,15 +1,13 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/ell_kernels.hpp"
 
-
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "accessor/reduced_row_major.hpp"
 #include "core/base/mixed_precision_types.hpp"
@@ -109,8 +107,10 @@ void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
 
     for (size_type j = 0; j < c->get_size()[1]; j++) {
         for (size_type row = 0; row < a->get_size()[0]; row++) {
-            arithmetic_type result = c->at(row, j);
-            result *= beta_val;
+            arithmetic_type result =
+                is_zero(beta_val)
+                    ? zero<arithmetic_type>()
+                    : beta_val * static_cast<arithmetic_type>(c->at(row, j));
             for (size_type i = 0; i < num_stored_elements_per_row; i++) {
                 arithmetic_type val = a_vals(row + i * stride);
                 auto col = a->col_at(row, i);

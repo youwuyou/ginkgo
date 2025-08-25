@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include <typeinfo>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/config/config.hpp>
@@ -15,7 +13,6 @@
 #include <ginkgo/core/solver/ir.hpp>
 #include <ginkgo/core/solver/multigrid.hpp>
 #include <ginkgo/core/stop/iteration.hpp>
-
 
 #include "core/config/config_helper.hpp"
 #include "core/config/registry_accessor.hpp"
@@ -104,6 +101,18 @@ TYPED_TEST(MultigridLevel, CreateDefault)
     auto ans = Config::default_type::build().on(this->exec);
 
     Config::validate(res.get(), ans.get());
+}
+
+
+TYPED_TEST(MultigridLevel, ThrowWhenKeyIsNotAllowed)
+{
+    using Config = typename TestFixture::Config;
+    auto pnode_map = Config::setup_base();
+    pnode_map["invalid_key"] = pnode{""};
+    auto config = pnode(pnode_map);
+
+    ASSERT_THROW(parse(config, this->reg, this->td).on(this->exec),
+                 gko::InvalidStateError);
 }
 
 
@@ -328,6 +337,17 @@ TEST_F(MultigridT, CreateDefault)
     auto ans = gko::solver::Multigrid::build().on(this->exec);
 
     Config::template validate<true>(res.get(), ans.get());
+}
+
+
+TEST_F(MultigridT, ThrowWhenKeyIsNotAllowed)
+{
+    auto pnode_map = Config::setup_base();
+    pnode_map["invalid_key"] = pnode{""};
+    auto config = pnode(pnode_map);
+
+    ASSERT_THROW(parse(config, this->reg, this->td).on(this->exec),
+                 gko::InvalidStateError);
 }
 
 

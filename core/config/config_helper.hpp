@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -6,9 +6,9 @@
 #define GKO_CORE_CONFIG_CONFIG_HELPER_HPP_
 
 
+#include <set>
 #include <string>
 #include <type_traits>
-
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/lin_op.hpp>
@@ -18,7 +18,6 @@
 #include <ginkgo/core/solver/solver_base.hpp>
 #include <ginkgo/core/stop/criterion.hpp>
 
-
 #include "core/config/registry_accessor.hpp"
 
 
@@ -26,10 +25,9 @@ namespace gko {
 namespace config {
 
 
-#define GKO_INVALID_CONFIG_VALUE(_entry, _value)                            \
-    GKO_INVALID_STATE(std::string("The value >" + _value +                  \
-                                  "< is invalid for the entry >" + _entry + \
-                                  "<"))
+#define GKO_INVALID_CONFIG_VALUE(_entry, _value)            \
+    GKO_INVALID_STATE(std::string("The value >") + _value + \
+                      "< is invalid for the entry >" + _entry + "<")
 
 
 #define GKO_MISSING_CONFIG_ENTRY(_entry) \
@@ -45,15 +43,18 @@ enum class LinOpFactoryType : int {
     Bicg,
     Bicgstab,
     Fcg,
+    PipeCg,
     Cgs,
     Ir,
     Idr,
     Gcr,
     Gmres,
     CbGmres,
+    Minres,
     Direct,
     LowerTrs,
     UpperTrs,
+    Chebyshev,
     Factorization_Ic,
     Factorization_Ilu,
     Cholesky,
@@ -62,12 +63,15 @@ enum class LinOpFactoryType : int {
     ParIct,
     ParIlu,
     ParIlut,
+    GaussSeidel,
     Ic,
     Ilu,
     Isai,
     Jacobi,
+    Sor,
     Multigrid,
-    Pgm
+    Pgm,
+    Schwarz
 };
 
 
@@ -141,6 +145,15 @@ parse_or_get_factory<const stop::CriterionFactory>(const pnode& config,
                                                    const type_descriptor& td);
 
 /**
+ * parse or get a std::vector of criteria.
+ * A stored single criterion will be converted to a std::vector.
+ */
+std::vector<deferred_factory_parameter<const stop::CriterionFactory>>
+parse_or_get_criteria(const pnode& config, const registry& context,
+                      const type_descriptor& td);
+
+
+/**
  * give a vector of factory by calling parse_or_get_factory.
  */
 template <typename T>
@@ -201,7 +214,10 @@ get_value(const pnode& config)
  * This is specialization for floating point type
  */
 template <typename ValueType>
-inline std::enable_if_t<std::is_floating_point<ValueType>::value, ValueType>
+inline std::enable_if_t<std::is_floating_point<ValueType>::value ||
+                            std::is_same<ValueType, float16>::value ||
+                            std::is_same<ValueType, bfloat16>::value,
+                        ValueType>
 get_value(const pnode& config)
 {
     auto val = config.get_real();
@@ -298,6 +314,33 @@ inline std::shared_ptr<typename Csr::strategy_type> get_strategy(
     }
     return strategy_ptr;
 }
+
+
+/**
+ * This is a decroator on top of config node. When we try to get a node by a
+ * key, it registers the keys as the allowed_keys. When this object is
+ * destroyed, it will check whether the config node only contains the key in
+ * allowed_keys. If some key is not in allowed_keys, it will throw an exception.
+ */
+class config_check_decorator {
+public:
+    config_check_decorator(
+        const pnode& config,
+        const std::set<std::string>& additional_allowed_keys = {});
+
+    // we allow exception here because we only use it in function not class.
+    ~config_check_decorator() noexcept(false);
+
+    config_check_decorator(const config_check_decorator&) = delete;
+
+    config_check_decorator& operator=(const config_check_decorator&) = delete;
+
+    const pnode& get(const std::string& key);
+
+private:
+    std::set<std::string> allowed_keys_;
+    const pnode& config_;
+};
 
 
 }  // namespace config

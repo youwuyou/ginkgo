@@ -1,9 +1,8 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include <ginkgo/core/matrix/csr.hpp>
-
 
 #include "core/factorization/elimination_forest.hpp"
 
@@ -22,6 +21,22 @@ namespace factorization {
  */
 template <typename ValueType, typename IndexType>
 void symbolic_cholesky(
+    const matrix::Csr<ValueType, IndexType>* mtx, bool symmetrize,
+    std::unique_ptr<matrix::Csr<ValueType, IndexType>>& factors,
+    std::unique_ptr<elimination_forest<IndexType>>& forest);
+
+
+/**
+ * Computes the symbolic Cholesky factorization of the given matrix on the
+ * device.
+ *
+ * @param mtx  the input matrix
+ * @param symmetrize  output the pattern of L + L^T (true) or just L (false)?
+ * @param factors  the output factor(s)
+ * @param forest  the elimination forest of the input matrix
+ */
+template <typename ValueType, typename IndexType>
+void symbolic_cholesky_device(
     const matrix::Csr<ValueType, IndexType>* mtx, bool symmetrize,
     std::unique_ptr<matrix::Csr<ValueType, IndexType>>& factors,
     std::unique_ptr<elimination_forest<IndexType>>& forest);

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,7 +8,6 @@
 
 #include <initializer_list>
 #include <vector>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/batch_lin_op.hpp>
@@ -47,10 +46,16 @@ namespace matrix {
  */
 template <typename ValueType = default_precision>
 class Dense final : public EnableBatchLinOp<Dense<ValueType>>,
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+                    public ConvertibleTo<Dense<next_precision<ValueType, 2>>>,
+#endif
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+                    public ConvertibleTo<Dense<next_precision<ValueType, 3>>>,
+#endif
                     public ConvertibleTo<Dense<next_precision<ValueType>>> {
     friend class EnablePolymorphicObject<Dense, BatchLinOp>;
     friend class Dense<to_complex<ValueType>>;
-    friend class Dense<next_precision<ValueType>>;
+    friend class Dense<previous_precision<ValueType>>;
 
 public:
     using EnableBatchLinOp<Dense>::convert_to;
@@ -66,6 +71,26 @@ public:
     void convert_to(Dense<next_precision<ValueType>>* result) const override;
 
     void move_to(Dense<next_precision<ValueType>>* result) override;
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+    friend class Dense<previous_precision<ValueType, 2>>;
+    using ConvertibleTo<Dense<next_precision<ValueType, 2>>>::convert_to;
+    using ConvertibleTo<Dense<next_precision<ValueType, 2>>>::move_to;
+
+    void convert_to(Dense<next_precision<ValueType, 2>>* result) const override;
+
+    void move_to(Dense<next_precision<ValueType, 2>>* result) override;
+#endif
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+    friend class Dense<previous_precision<ValueType, 3>>;
+    using ConvertibleTo<Dense<next_precision<ValueType, 3>>>::convert_to;
+    using ConvertibleTo<Dense<next_precision<ValueType, 3>>>::move_to;
+
+    void convert_to(Dense<next_precision<ValueType, 3>>* result) const override;
+
+    void move_to(Dense<next_precision<ValueType, 3>>* result) override;
+#endif
 
     /**
      * Creates a mutable view (of gko::matrix::Dense type) of one item of the

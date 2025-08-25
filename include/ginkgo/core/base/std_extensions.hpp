@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -10,6 +10,8 @@
 #include <functional>
 #include <memory>
 #include <type_traits>
+
+#include "ginkgo/core/base/types.hpp"
 
 
 // This header provides implementations of useful utilities introduced into the
@@ -37,20 +39,18 @@ struct make_void {
 }  // namespace detail
 
 
-// Added in C++17
+/**
+ * Use the custom implementation, since the std::void_t used in
+ * is_matrix_type_builder seems to trigger a compiler bug in GCC 7.5.
+ */
 template <typename... Ts>
 using void_t = typename detail::make_void<Ts...>::type;
 
 
-// Disable deprecation warnings when using standard > C++14
+GKO_DEPRECATED("use std::uncaught_exceptions")
 inline bool uncaught_exception() noexcept
 {
-// MSVC uses _MSVC_LANG as __cplusplus
-#if (defined(_MSVC_LANG) && _MSVC_LANG > 201402L) || __cplusplus > 201402L
     return std::uncaught_exceptions() > 0;
-#else
-    return std::uncaught_exception();
-#endif
 }
 
 
@@ -101,14 +101,18 @@ constexpr bool less_equal(const T&& lhs, const T&& rhs)
 }
 
 
-// available in <type_traits> with C++17
-template <class...>
-struct conjunction : std::true_type {};
-template <class B1>
-struct conjunction<B1> : B1 {};
-template <class B1, class... Bn>
-struct conjunction<B1, Bn...>
-    : std::conditional_t<bool(B1::value), conjunction<Bn...>, B1> {};
+template <class... Ts>
+using conjunction = std::conjunction<Ts...>;
+
+
+// Provide the type_identity from C++20
+template <typename T>
+struct type_identity {
+    using type = T;
+};
+
+template <typename T>
+using type_identity_t = typename type_identity<T>::type;
 
 
 }  // namespace xstd

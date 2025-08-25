@@ -1,35 +1,32 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-// force-top: on
+// clang-format off
 // TODO remove when the HIP includes are fixed
 #include <hip/hip_runtime.h>
-// force-top: off
+// clang-format on
 
 
-#include "hip/components/cooperative_groups.hip.hpp"
-
+#include "common/cuda_hip/components/cooperative_groups.hpp"
 
 #include <cstring>
 #include <memory>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/executor.hpp>
 
-
-#include "hip/base/types.hip.hpp"
+#include "common/cuda_hip/base/types.hpp"
 #include "hip/test/utils.hip.hpp"
 
 
-namespace {
+// put the test in gko namespace to easily adapt the thrust/cub in gko or not
+namespace gko {
 
 
-using namespace gko::kernels::hip;
+using namespace kernels::hip;
 
 
 class CooperativeGroups : public HipTestFixture {
@@ -84,7 +81,8 @@ __global__ void cg_shuffle(bool* s)
         group::tiled_partition<config::warp_size>(group::this_thread_block());
     auto i = int(group.thread_rank());
     test_assert(s, group.shfl_up(i, 1) == max(0, i - 1));
-    test_assert(s, group.shfl_down(i, 1) == min(i + 1, config::warp_size - 1));
+    test_assert(s, group.shfl_down(i, 1) ==
+                       min(i + 1, static_cast<int>(config::warp_size) - 1));
     test_assert(s, group.shfl(i, 0) == 0);
 }
 
@@ -122,9 +120,9 @@ __global__ void cg_ballot(bool* s)
 {
     auto group =
         group::tiled_partition<config::warp_size>(group::this_thread_block());
-    test_assert(s, group.ballot(false) == 0);
-    test_assert(s, group.ballot(true) == ~config::lane_mask_type{});
-    test_assert(s, group.ballot(threadIdx.x < 4) == 0xf);
+    test_assert(s, group::ballot(group, false) == 0);
+    test_assert(s, group::ballot(group, true) == ~config::lane_mask_type{});
+    test_assert(s, group::ballot(group, threadIdx.x < 4) == 0xf);
 }
 
 
@@ -225,17 +223,18 @@ __global__ void cg_subwarp_ballot(bool* s)
     auto group =
         group::tiled_partition<subwarp_size>(group::this_thread_block());
     auto i = group.thread_rank();
-    test_assert(s, !test_grp || group.ballot(!test_grp) == 0);
-    test_assert(s, !test_grp || group.ballot(test_grp) == full_mask);
-    test_assert(s, !test_grp || group.ballot(i < 4 || !test_grp) == 0xf);
+    test_assert(s, !test_grp || group::ballot(group, !test_grp) == 0);
+    test_assert(s, !test_grp || group::ballot(group, test_grp) == full_mask);
+    test_assert(s,
+                !test_grp || group::ballot(group, i < 4 || !test_grp) == 0xf);
     if (test_grp) {
-        test_assert(s, group.ballot(false) == 0);
-        test_assert(s, group.ballot(true) == full_mask);
-        test_assert(s, group.ballot(i < 4) == 0xf);
+        test_assert(s, group::ballot(group, false) == 0);
+        test_assert(s, group::ballot(group, true) == full_mask);
+        test_assert(s, group::ballot(group, i < 4) == 0xf);
     } else {
-        test_assert(s, group.ballot(true) == full_mask);
-        test_assert(s, group.ballot(i < 4) == 0xf);
-        test_assert(s, group.ballot(false) == 0);
+        test_assert(s, group::ballot(group, true) == full_mask);
+        test_assert(s, group::ballot(group, i < 4) == 0xf);
+        test_assert(s, group::ballot(group, false) == 0);
     }
 }
 
@@ -244,6 +243,42 @@ TEST_F(CooperativeGroups, SubwarpBallot) { test(cg_subwarp_ballot); }
 
 
 TEST_F(CooperativeGroups, SubwarpBallot2) { test_subwarp(cg_subwarp_ballot); }
+
+
+__global__ void cg_communicator_categorization(bool*)
+{
+    auto this_block = group::this_thread_block();
+    auto tiled_partition =
+        group::tiled_partition<config::warp_size>(this_block);
+    auto subwarp_partition = group::tiled_partition<subwarp_size>(this_block);
+
+    using not_group = int;
+    using this_block_t = decltype(this_block);
+    using tiled_partition_t = decltype(tiled_partition);
+    using subwarp_partition_t = decltype(subwarp_partition);
+
+    static_assert(!group::is_group<not_group>::value &&
+                      group::is_group<this_block_t>::value &&
+                      group::is_group<tiled_partition_t>::value &&
+                      group::is_group<subwarp_partition_t>::value,
+                  "Group check doesn't work.");
+    static_assert(
+        !group::is_synchronizable_group<not_group>::value &&
+            group::is_synchronizable_group<this_block_t>::value &&
+            group::is_synchronizable_group<tiled_partition_t>::value &&
+            group::is_synchronizable_group<subwarp_partition_t>::value,
+        "Synchronizable group check doesn't work.");
+    static_assert(!group::is_communicator_group<not_group>::value &&
+                      !group::is_communicator_group<this_block_t>::value &&
+                      group::is_communicator_group<tiled_partition_t>::value &&
+                      group::is_communicator_group<subwarp_partition_t>::value,
+                  "Communicator group check doesn't work.");
+}
+
+TEST_F(CooperativeGroups, CorrectCategorization)
+{
+    test(cg_communicator_categorization);
+}
 
 
 template <typename ValueType>
@@ -305,4 +340,4 @@ TEST_F(CooperativeGroups, ShuffleSumComplexDouble)
 }
 
 
-}  // namespace
+}  // namespace gko

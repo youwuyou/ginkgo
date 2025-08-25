@@ -1,12 +1,9 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #ifndef GKO_BENCHMARK_UTILS_GENERAL_HPP_
 #define GKO_BENCHMARK_UTILS_GENERAL_HPP_
-
-
-#include <ginkgo/ginkgo.hpp>
 
 
 #include <algorithm>
@@ -24,12 +21,11 @@
 #include <utility>
 #include <vector>
 
-
 #include <gflags/gflags.h>
 
+#include <ginkgo/ginkgo.hpp>
 
 #include <ginkgo/core/base/memory.hpp>
-
 
 #include "benchmark/utils/json.hpp"
 #include "benchmark/utils/timer.hpp"
@@ -172,11 +168,11 @@ void initialize_argument_parsing(int* argc, char** argv[], std::string& header,
  *
  * @param extra  describes benchmark specific extra parameters to output
  */
-void print_general_information(const std::string& extra)
+void print_general_information(const std::string& extra,
+                               std::shared_ptr<const gko::Executor> exec)
 {
     std::clog << gko::version_info::get() << std::endl
-              << "Running on " << FLAGS_executor << "(" << FLAGS_device_id
-              << ")\n"
+              << "Running on " << exec->get_description() << std::endl
               << "Running with " << FLAGS_warmup << " warm iterations and ";
     if (FLAGS_repetitions == "auto") {
         std::clog << "adaptively determined repetititions with "
@@ -529,6 +525,33 @@ gko::remove_complex<ValueType> compute_max_relative_norm2(
             max_relative_norm2);
     }
     return max_relative_norm2;
+}
+
+
+template <typename VectorType>
+std::unique_ptr<VectorType> create_normalized_manufactured_rhs(
+    std::shared_ptr<const gko::Executor> exec, const gko::LinOp* system_matrix,
+    const VectorType* solution)
+{
+    auto rhs = VectorType::create_with_config_of(solution);
+
+    auto vec_size = solution->get_size();
+    auto scaled_solution = gko::clone(solution);
+    auto scalar = gko::matrix::Dense<rc_etype>::create(
+        exec->get_master(), gko::dim<2>{1, vec_size[1]});
+    solution->compute_norm2(scalar);
+    for (gko::size_type i = 0; i < vec_size[1]; ++i) {
+        scalar->at(0, i) = gko::one<rc_etype>() / scalar->at(0, i);
+    }
+    // normalize solution
+    if (gko::is_complex_s<etype>::value) {
+        scaled_solution->scale(scalar->make_complex());
+    } else {
+        scaled_solution->scale(scalar);
+    }
+    system_matrix->apply(scaled_solution, rhs);
+
+    return rhs;
 }
 
 

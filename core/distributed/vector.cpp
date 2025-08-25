@@ -1,15 +1,14 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/distributed/vector.hpp>
-
+#include "ginkgo/core/distributed/vector.hpp"
 
 #include <ginkgo/core/distributed/partition.hpp>
 
-
 #include "core/distributed/vector_kernels.hpp"
 #include "core/matrix/dense_kernels.hpp"
+#include "core/mpi/mpi_op.hpp"
 
 
 namespace gko {
@@ -64,7 +63,7 @@ template <typename ValueType>
 Vector<ValueType>::Vector(std::shared_ptr<const Executor> exec,
                           mpi::communicator comm, dim<2> global_size,
                           dim<2> local_size, size_type stride)
-    : EnableDistributedLinOp<Vector<ValueType>>{exec, global_size},
+    : EnableLinOp<Vector>{exec, global_size},
       DistributedBase{comm},
       local_{exec, local_size, stride}
 {
@@ -75,7 +74,7 @@ template <typename ValueType>
 Vector<ValueType>::Vector(std::shared_ptr<const Executor> exec,
                           mpi::communicator comm, dim<2> global_size,
                           std::unique_ptr<local_vector_type> local_vector)
-    : EnableDistributedLinOp<Vector<ValueType>>{exec, global_size},
+    : EnableLinOp<Vector>{exec, global_size},
       DistributedBase{comm},
       local_{exec}
 {
@@ -87,9 +86,7 @@ template <typename ValueType>
 Vector<ValueType>::Vector(std::shared_ptr<const Executor> exec,
                           mpi::communicator comm,
                           std::unique_ptr<local_vector_type> local_vector)
-    : EnableDistributedLinOp<Vector<ValueType>>{exec, {}},
-      DistributedBase{comm},
-      local_{exec}
+    : EnableLinOp<Vector>{exec, {}}, DistributedBase{comm}, local_{exec}
 {
     this->set_size(compute_global_size(exec, comm, local_vector->get_size()));
     local_vector->move_to(&local_);
@@ -143,9 +140,9 @@ std::unique_ptr<const Vector<ValueType>> Vector<ValueType>::create_const(
     auto non_const_local_vector =
         const_cast<local_vector_type*>(local_vector.release());
 
-    return std::unique_ptr<const Vector<ValueType>>(new Vector<ValueType>(
-        std::move(exec), std::move(comm), global_size,
-        std::unique_ptr<local_vector_type>{non_const_local_vector}));
+    return std::unique_ptr<const Vector>(
+        new Vector(std::move(exec), std::move(comm), global_size,
+                   std::unique_ptr<local_vector_type>{non_const_local_vector}));
 }
 
 
@@ -156,8 +153,8 @@ std::unique_ptr<const Vector<ValueType>> Vector<ValueType>::create_const(
 {
     auto global_size =
         compute_global_size(exec, comm, local_vector->get_size());
-    return Vector<ValueType>::create_const(
-        std::move(exec), std::move(comm), global_size, std::move(local_vector));
+    return Vector::create_const(std::move(exec), std::move(comm), global_size,
+                                std::move(local_vector));
 }
 
 
@@ -175,8 +172,7 @@ std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_with_config_of(
 
 template <typename ValueType>
 std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_with_type_of(
-    ptr_param<const Vector<ValueType>> other,
-    std::shared_ptr<const Executor> exec)
+    ptr_param<const Vector> other, std::shared_ptr<const Executor> exec)
 {
     return (*other).create_with_type_of_impl(exec, {}, {}, 0);
 }
@@ -184,9 +180,8 @@ std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_with_type_of(
 
 template <typename ValueType>
 std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_with_type_of(
-    ptr_param<const Vector<ValueType>> other,
-    std::shared_ptr<const Executor> exec, const dim<2>& global_size,
-    const dim<2>& local_size, size_type stride)
+    ptr_param<const Vector> other, std::shared_ptr<const Executor> exec,
+    const dim<2>& global_size, const dim<2>& local_size, size_type stride)
 {
     return (*other).create_with_type_of_impl(exec, global_size, local_size,
                                              stride);
@@ -301,6 +296,45 @@ void Vector<ValueType>::move_to(Vector<next_precision<ValueType>>* result)
 }
 
 
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+template <typename ValueType>
+void Vector<ValueType>::convert_to(
+    Vector<next_precision<ValueType, 2>>* result) const
+{
+    GKO_ASSERT(this->get_communicator().size() ==
+               result->get_communicator().size());
+    result->set_size(this->get_size());
+    this->get_local_vector()->convert_to(&result->local_);
+}
+
+
+template <typename ValueType>
+void Vector<ValueType>::move_to(Vector<next_precision<ValueType, 2>>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+template <typename ValueType>
+void Vector<ValueType>::convert_to(
+    Vector<next_precision<ValueType, 3>>* result) const
+{
+    GKO_ASSERT(this->get_communicator().size() ==
+               result->get_communicator().size());
+    result->set_size(this->get_size());
+    this->get_local_vector()->convert_to(&result->local_);
+}
+
+
+template <typename ValueType>
+void Vector<ValueType>::move_to(Vector<next_precision<ValueType, 3>>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
 template <typename ValueType>
 std::unique_ptr<typename Vector<ValueType>::absolute_type>
 Vector<ValueType>::compute_absolute() const
@@ -412,7 +446,7 @@ template <typename ValueType>
 void Vector<ValueType>::add_scaled(ptr_param<const LinOp> alpha,
                                    ptr_param<const LinOp> b)
 {
-    auto dense_b = as<Vector<ValueType>>(b);
+    auto dense_b = as<Vector>(b);
     local_.add_scaled(alpha, dense_b->get_local_vector());
 }
 
@@ -421,7 +455,7 @@ template <typename ValueType>
 void Vector<ValueType>::sub_scaled(ptr_param<const LinOp> alpha,
                                    ptr_param<const LinOp> b)
 {
-    auto dense_b = as<Vector<ValueType>>(b);
+    auto dense_b = as<Vector>(b);
     local_.sub_scaled(alpha, dense_b->get_local_vector());
 }
 
@@ -448,16 +482,17 @@ void Vector<ValueType>::compute_dot(ptr_param<const LinOp> b,
     this->get_local_vector()->compute_dot(as<Vector>(b)->get_local_vector(),
                                           dense_res.get(), tmp);
     exec->synchronize();
+    auto sum_op = gko::experimental::mpi::sum<ValueType>();
     if (mpi::requires_host_buffer(exec, comm)) {
         host_reduction_buffer_.init(exec->get_master(), dense_res->get_size());
         host_reduction_buffer_->copy_from(dense_res.get());
         comm.all_reduce(exec->get_master(),
                         host_reduction_buffer_->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]), sum_op.get_op());
         dense_res->copy_from(host_reduction_buffer_.get());
     } else {
         comm.all_reduce(exec, dense_res->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]), sum_op.get_op());
     }
 }
 
@@ -484,16 +519,17 @@ void Vector<ValueType>::compute_conj_dot(ptr_param<const LinOp> b,
     this->get_local_vector()->compute_conj_dot(
         as<Vector>(b)->get_local_vector(), dense_res.get(), tmp);
     exec->synchronize();
+    auto sum_op = gko::experimental::mpi::sum<ValueType>();
     if (mpi::requires_host_buffer(exec, comm)) {
         host_reduction_buffer_.init(exec->get_master(), dense_res->get_size());
         host_reduction_buffer_->copy_from(dense_res.get());
         comm.all_reduce(exec->get_master(),
                         host_reduction_buffer_->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]), sum_op.get_op());
         dense_res->copy_from(host_reduction_buffer_.get());
     } else {
         comm.all_reduce(exec, dense_res->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]), sum_op.get_op());
     }
 }
 
@@ -538,15 +574,18 @@ void Vector<ValueType>::compute_norm1(ptr_param<LinOp> result,
     auto dense_res = make_temporary_clone(exec, as<NormVector>(result));
     this->get_local_vector()->compute_norm1(dense_res.get());
     exec->synchronize();
+    auto norm_sum_op = gko::experimental::mpi::sum<remove_complex<ValueType>>();
     if (mpi::requires_host_buffer(exec, comm)) {
         host_norm_buffer_.init(exec->get_master(), dense_res->get_size());
         host_norm_buffer_->copy_from(dense_res.get());
         comm.all_reduce(exec->get_master(), host_norm_buffer_->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]),
+                        norm_sum_op.get_op());
         dense_res->copy_from(host_norm_buffer_.get());
     } else {
         comm.all_reduce(exec, dense_res->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]),
+                        norm_sum_op.get_op());
     }
 }
 
@@ -571,15 +610,18 @@ void Vector<ValueType>::compute_squared_norm2(ptr_param<LinOp> result,
     exec->run(vector::make_compute_squared_norm2(this->get_local_vector(),
                                                  dense_res.get(), tmp));
     exec->synchronize();
+    auto norm_sum_op = gko::experimental::mpi::sum<remove_complex<ValueType>>();
     if (mpi::requires_host_buffer(exec, comm)) {
         host_norm_buffer_.init(exec->get_master(), dense_res->get_size());
         host_norm_buffer_->copy_from(dense_res.get());
         comm.all_reduce(exec->get_master(), host_norm_buffer_->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]),
+                        norm_sum_op.get_op());
         dense_res->copy_from(host_norm_buffer_.get());
     } else {
         comm.all_reduce(exec, dense_res->get_values(),
-                        static_cast<int>(this->get_size()[1]), MPI_SUM);
+                        static_cast<int>(this->get_size()[1]),
+                        norm_sum_op.get_op());
     }
 }
 
@@ -613,15 +655,17 @@ void Vector<ValueType>::compute_mean(ptr_param<LinOp> result,
     dense_res->scale(weight.get());
 
     exec->synchronize();
+    auto sum_op = gko::experimental::mpi::sum<ValueType>();
     if (mpi::requires_host_buffer(exec, comm)) {
         host_reduction_buffer_.init(exec->get_master(), dense_res->get_size());
         host_reduction_buffer_->copy_from(dense_res.get());
         comm.all_reduce(exec->get_master(),
                         host_reduction_buffer_->get_values(), num_vecs,
-                        MPI_SUM);
+                        sum_op.get_op());
         dense_res->copy_from(host_reduction_buffer_.get());
     } else {
-        comm.all_reduce(exec, dense_res->get_values(), num_vecs, MPI_SUM);
+        comm.all_reduce(exec, dense_res->get_values(), num_vecs,
+                        sum_op.get_op());
     }
 }
 
@@ -706,6 +750,14 @@ Vector<ValueType>::create_real_view()
 
 
 template <typename ValueType>
+std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_submatrix(
+    local_span rows, local_span columns, dim<2> global_size)
+{
+    return this->create_submatrix_impl(rows, columns, global_size);
+}
+
+
+template <typename ValueType>
 std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_with_same_config()
     const
 {
@@ -722,6 +774,15 @@ std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_with_type_of_impl(
 {
     return Vector::create(exec, this->get_communicator(), global_size,
                           local_size, stride);
+}
+
+
+template <typename ValueType>
+std::unique_ptr<Vector<ValueType>> Vector<ValueType>::create_submatrix_impl(
+    local_span rows, local_span columns, dim<2> global_size)
+{
+    return Vector::create(this->get_executor(), this->get_communicator(),
+                          global_size, local_.create_submatrix(rows, columns));
 }
 
 

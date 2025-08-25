@@ -1,19 +1,16 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/sparsity_csr_kernels.hpp"
 
-
 #include <algorithm>
 #include <numeric>
 #include <utility>
 
-
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/base/mixed_precision_types.hpp"
 #include "core/components/fill_array_kernels.hpp"
@@ -89,7 +86,9 @@ void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
                     val * static_cast<arithmetic_type>(b->at(col_idxs[k], j));
             }
             c->at(row, j) = static_cast<OutputValueType>(
-                vbeta * static_cast<arithmetic_type>(c->at(row, j)) +
+                (is_zero(vbeta)
+                     ? zero(vbeta)
+                     : vbeta * static_cast<arithmetic_type>(c->at(row, j))) +
                 valpha * temp_val);
         }
     }

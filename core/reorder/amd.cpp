@@ -2,11 +2,9 @@
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/reorder/amd.hpp>
-
+#include "ginkgo/core/reorder/amd.hpp"
 
 #include <cstddef>
-
 
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
@@ -14,7 +12,6 @@
 #include <ginkgo/core/matrix/identity.hpp>
 #include <ginkgo/core/matrix/permutation.hpp>
 #include <ginkgo/core/matrix/sparsity_csr.hpp>
-
 
 #include "core/base/allocator.hpp"
 
@@ -157,7 +154,8 @@ std::unique_ptr<LinOp> Amd<IndexType>::generate_impl(
     // row workspace
     const auto col_idxs_plus_workspace_size = nnz + nnz / 5 + 2 * num_rows;
     array<IndexType> col_idxs_plus_workspace{
-        host_exec, col_idxs_plus_workspace_size + 6 * num_rows};
+        host_exec,
+        static_cast<size_type>(col_idxs_plus_workspace_size + 6 * num_rows)};
     host_exec->copy_from(exec, nnz, pattern->get_const_col_idxs(),
                          col_idxs_plus_workspace.get_data());
 

@@ -1,19 +1,15 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/factorization/cholesky_kernels.hpp"
 
-
 #include <algorithm>
 #include <memory>
 
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/core/matrix/csr.hpp>
-
 
 #include "core/factorization/elimination_forest.hpp"
 
@@ -147,16 +143,6 @@ GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
 
 
 template <typename ValueType, typename IndexType>
-void forest_from_factor(std::shared_ptr<const DefaultExecutor> exec,
-                        const matrix::Csr<ValueType, IndexType>* factors,
-                        gko::factorization::elimination_forest<IndexType>&
-                            forest) GKO_NOT_IMPLEMENTED;
-
-GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
-    GKO_DECLARE_CHOLESKY_FOREST_FROM_FACTOR);
-
-
-template <typename ValueType, typename IndexType>
 void initialize(std::shared_ptr<const DefaultExecutor> exec,
                 const matrix::Csr<ValueType, IndexType>* mtx,
                 const IndexType* factor_lookup_offsets,
@@ -174,7 +160,7 @@ void factorize(std::shared_ptr<const DefaultExecutor> exec,
                const int32* lookup_storage, const IndexType* diag_idxs,
                const IndexType* transpose_idxs,
                const factorization::elimination_forest<IndexType>& forest,
-               matrix::Csr<ValueType, IndexType>* factors,
+               matrix::Csr<ValueType, IndexType>* factors, bool full_fillin,
                array<int>& tmp_storage) GKO_NOT_IMPLEMENTED;
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CHOLESKY_FACTORIZE);

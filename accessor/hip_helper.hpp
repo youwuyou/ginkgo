@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,9 +8,7 @@
 
 #include <type_traits>
 
-
 #include <thrust/complex.h>
-
 
 #include "block_col_major.hpp"
 #include "reduced_row_major.hpp"
@@ -19,7 +17,21 @@
 #include "utils.hpp"
 
 
+struct __half;
+
+struct hip_bfloat16;
+
+struct __hip_bfloat16;
+
+
 namespace gko {
+
+
+class half;
+
+class bfloat16;
+
+
 namespace acc {
 namespace detail {
 
@@ -55,11 +67,25 @@ struct hip_type<T&&> {
     using type = typename hip_type<T>::type&&;
 };
 
+template <>
+struct hip_type<gko::half> {
+    using type = __half;
+};
+
+template <>
+struct hip_type<gko::bfloat16> {
+#if HIP_VERSION >= 60200000
+    using type = __hip_bfloat16;
+#else
+    using type = hip_bfloat16;
+#endif
+};
+
 
 // Transform std::complex to thrust::complex
 template <typename T>
 struct hip_type<std::complex<T>> {
-    using type = thrust::complex<T>;
+    using type = thrust::complex<typename hip_type<T>::type>;
 };
 
 

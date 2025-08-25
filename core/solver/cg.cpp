@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/solver/cg.hpp>
+#include "ginkgo/core/solver/cg.hpp"
 
+#include <string>
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
@@ -13,12 +14,11 @@
 #include <ginkgo/core/base/precision_dispatch.hpp>
 #include <ginkgo/core/base/utils.hpp>
 
-
+#include "core/config/config_helper.hpp"
 #include "core/config/solver_config.hpp"
 #include "core/distributed/helpers.hpp"
 #include "core/solver/cg_kernels.hpp"
 #include "core/solver/solver_boilerplate.hpp"
-
 
 namespace gko {
 namespace solver {
@@ -41,7 +41,9 @@ typename Cg<ValueType>::parameters_type Cg<ValueType>::parse(
     const config::type_descriptor& td_for_child)
 {
     auto params = solver::Cg<ValueType>::build();
-    common_solver_parse(params, config, context, td_for_child);
+    config::config_check_decorator config_check(config);
+    config::common_solver_parse(params, config_check, context, td_for_child);
+
     return params;
 }
 
@@ -104,7 +106,6 @@ void Cg<ValueType>::apply_dense_impl(const VectorType* dense_b,
     GKO_SOLVER_VECTOR(p, dense_b);
     GKO_SOLVER_VECTOR(q, dense_b);
 
-    GKO_SOLVER_SCALAR(alpha, dense_b);
     GKO_SOLVER_SCALAR(beta, dense_b);
     GKO_SOLVER_SCALAR(prev_rho, dense_b);
     GKO_SOLVER_SCALAR(rho, dense_b);
@@ -208,7 +209,7 @@ int workspace_traits<Cg<ValueType>>::num_arrays(const Solver&)
 template <typename ValueType>
 int workspace_traits<Cg<ValueType>>::num_vectors(const Solver&)
 {
-    return 10;
+    return 9;
 }
 
 
@@ -217,8 +218,7 @@ std::vector<std::string> workspace_traits<Cg<ValueType>>::op_names(
     const Solver&)
 {
     return {
-        "r",    "z",        "p",   "q",   "alpha",
-        "beta", "prev_rho", "rho", "one", "minus_one",
+        "r", "z", "p", "q", "beta", "prev_rho", "rho", "one", "minus_one",
     };
 }
 
@@ -234,7 +234,7 @@ std::vector<std::string> workspace_traits<Cg<ValueType>>::array_names(
 template <typename ValueType>
 std::vector<int> workspace_traits<Cg<ValueType>>::scalars(const Solver&)
 {
-    return {alpha, beta, prev_rho, rho};
+    return {beta, prev_rho, rho};
 }
 
 

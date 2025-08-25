@@ -1,18 +1,15 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/matrix/dense.hpp>
-
+#include "core/matrix/dense_kernels.hpp"
 
 #include <complex>
 #include <memory>
 #include <numeric>
 #include <random>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -20,6 +17,7 @@
 #include <ginkgo/core/base/precision_dispatch.hpp>
 #include <ginkgo/core/matrix/coo.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
+#include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
 #include <ginkgo/core/matrix/hybrid.hpp>
@@ -28,8 +26,6 @@
 #include <ginkgo/core/matrix/sellp.hpp>
 #include <ginkgo/core/matrix/sparsity_csr.hpp>
 
-
-#include "core/matrix/dense_kernels.hpp"
 #include "core/test/utils.hpp"
 
 
@@ -79,8 +75,7 @@ protected:
         return gko::test::generate_random_matrix<MtxType>(
             num_rows, num_cols,
             std::uniform_int_distribution<gko::size_type>(num_cols, num_cols),
-            std::normal_distribution<gko::remove_complex<value_type>>(0.0, 1.0),
-            rand_engine, exec);
+            std::normal_distribution<>(0.0, 1.0), rand_engine, exec);
     }
 };
 
@@ -235,6 +230,25 @@ TYPED_TEST(Dense, AppliesLinearCombinationToDense)
 }
 
 
+TYPED_TEST(Dense, AppliesLinearCombinationToDenseWithZeroBetaNan)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto alpha = gko::initialize<Mtx>({-1.0}, this->exec);
+    auto beta = gko::initialize<Mtx>({0.0}, this->exec);
+    this->mtx3->fill(gko::nan<T>());
+
+    this->mtx2->apply(alpha, this->mtx1, beta, this->mtx3);
+
+    EXPECT_EQ(this->mtx3->at(0, 0), T{0.5});
+    EXPECT_EQ(this->mtx3->at(0, 1), T{0.5});
+    EXPECT_EQ(this->mtx3->at(0, 2), T{0.5});
+    EXPECT_EQ(this->mtx3->at(1, 0), T{-1.0});
+    EXPECT_EQ(this->mtx3->at(1, 1), T{-1.0});
+    EXPECT_EQ(this->mtx3->at(1, 2), T{-1.0});
+}
+
+
 TYPED_TEST(Dense, AppliesLinearCombinationToMixedDense)
 {
     using MixedMtx = typename TestFixture::MixedMtx;
@@ -342,6 +356,22 @@ TYPED_TEST(Dense, ScalesDataWithScalar)
     EXPECT_EQ(this->mtx2->at(0, 1), T{-2.0});
     EXPECT_EQ(this->mtx2->at(1, 0), T{-4.0});
     EXPECT_EQ(this->mtx2->at(1, 1), T{4.0});
+}
+
+
+TYPED_TEST(Dense, ScalesDataWithZeroScalarNaN)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto alpha = gko::initialize<Mtx>({I<T>{0.0}}, this->exec);
+    this->mtx2->fill(gko::nan<T>());
+
+    this->mtx2->scale(alpha);
+
+    EXPECT_EQ(this->mtx2->at(0, 0), T{0.0});
+    EXPECT_EQ(this->mtx2->at(0, 1), T{0.0});
+    EXPECT_EQ(this->mtx2->at(1, 0), T{0.0});
+    EXPECT_EQ(this->mtx2->at(1, 1), T{0.0});
 }
 
 
@@ -459,6 +489,34 @@ TYPED_TEST(Dense, AddsScaledWithScalar)
     EXPECT_EQ(this->mtx1->at(1, 1), T{5.5});
     EXPECT_EQ(this->mtx1->at(1, 2), T{8.5});
     ASSERT_EQ(this->mtx1->get_values()[3], in_stride);
+}
+
+
+TYPED_TEST(Dense, AddsScaledWithZeroScalar)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto alpha = gko::initialize<Mtx>({0.0}, this->exec);
+    this->mtx3->fill(gko::nan<T>());
+    const auto expected = this->mtx1->clone();
+
+    this->mtx1->add_scaled(alpha, this->mtx3);
+
+    GKO_ASSERT_MTX_NEAR(this->mtx1, expected, 0.0);
+}
+
+
+TYPED_TEST(Dense, SubtractsScaledWithZeroScalar)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto alpha = gko::initialize<Mtx>({0.0}, this->exec);
+    this->mtx3->fill(gko::nan<T>());
+    const auto expected = this->mtx1->clone();
+
+    this->mtx1->sub_scaled(alpha, this->mtx3);
+
+    GKO_ASSERT_MTX_NEAR(this->mtx1, expected, 0.0);
 }
 
 
@@ -755,9 +813,11 @@ TYPED_TEST(Dense, ConvertsToPrecision)
     auto tmp = OtherDense::create(this->exec);
     auto res = Dense::create(this->exec);
     // If OtherT is more precise: 0, otherwise r
-    auto residual = r<OtherT>::value < r<T>::value
-                        ? gko::remove_complex<T>{0}
-                        : gko::remove_complex<T>{r<OtherT>::value};
+    auto residual =
+        r<OtherT>::value < r<T>::value
+            ? gko::remove_complex<T>{0}
+            : gko::remove_complex<T>{
+                  static_cast<gko::remove_complex<T>>(r<OtherT>::value)};
 
     this->mtx1->convert_to(tmp);
     tmp->convert_to(res);
@@ -775,9 +835,11 @@ TYPED_TEST(Dense, MovesToPrecision)
     auto tmp = OtherDense::create(this->exec);
     auto res = Dense::create(this->exec);
     // If OtherT is more precise: 0, otherwise r
-    auto residual = r<OtherT>::value < r<T>::value
-                        ? gko::remove_complex<T>{0}
-                        : gko::remove_complex<T>{r<OtherT>::value};
+    auto residual =
+        r<OtherT>::value < r<T>::value
+            ? gko::remove_complex<T>{0}
+            : gko::remove_complex<T>{
+                  static_cast<gko::remove_complex<T>>(r<OtherT>::value)};
 
     this->mtx1->move_to(tmp);
     tmp->move_to(res);

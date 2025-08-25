@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,12 +8,12 @@
 
 #include <memory>
 
-
 #include <ginkgo/core/base/composition.hpp>
 #include <ginkgo/core/base/lin_op.hpp>
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/config/config.hpp>
 #include <ginkgo/core/config/registry.hpp>
+#include <ginkgo/core/factorization/incomplete_factorization.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 
 
@@ -100,6 +100,16 @@ public:
          * be used to avoid the transposition operation.
          */
         bool GKO_FACTORY_PARAMETER_SCALAR(both_factors, true);
+
+        /**
+         * Select the implementation which is supposed to be used for
+         * the incomplete factorization. This only matters for the
+         * CUDA/HIP/REFERENCE executor where the choice is between the Ginkgo
+         * (syncfree) and the cuSPARSE/hipSPARSE/reference (sparselib)
+         * implementation. Default is sparselib.
+         */
+        incomplete_algorithm GKO_FACTORY_PARAMETER_SCALAR(
+            algorithm, incomplete_algorithm::sparselib);
     };
     GKO_ENABLE_LIN_OP_FACTORY(Ic, parameters, Factory);
     GKO_ENABLE_BUILD_METHOD(Factory);

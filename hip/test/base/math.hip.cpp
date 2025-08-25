@@ -1,42 +1,41 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-// force-top: on
+// clang-format off
 // prevent compilation failure related to disappearing assert(...) statements
 #include <hip/hip_runtime.h>
-// force-top: off
+// clang-format on
 
 
-#include <ginkgo/core/base/math.hpp>
-
+#include "common/cuda_hip/base/math.hpp"
 
 #include <cmath>
 #include <complex>
 #include <memory>
 
-
 #include <gtest/gtest.h>
 
-
+#include <ginkgo/config.hpp>
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/executor.hpp>
+#include <ginkgo/core/base/math.hpp>
 
-
-#include "hip/base/math.hip.hpp"
-#include "hip/base/types.hip.hpp"
+#include "common/cuda_hip/base/bf16_alias.hpp"
+#include "common/cuda_hip/base/types.hpp"
 #include "hip/test/utils.hip.hpp"
 
 
-namespace {
+// put the test in gko namespace to easily adapt the thrust/cub in gko or not
+namespace gko {
 namespace kernel {
 
 
 template <typename T, typename FuncType>
 __device__ bool test_real_is_finite_function(FuncType isfin)
 {
-    constexpr T inf = gko::device_numeric_limits<T>::inf;
-    constexpr T quiet_nan = NAN;
+    const T inf = gko::device_numeric_limits<T>::inf();
+    const auto quiet_nan = static_cast<T>(NAN);
     bool test_true{};
     bool test_false{};
 
@@ -55,8 +54,8 @@ __device__ bool test_complex_is_finite_function(FuncType isfin)
                   "Template type must be a complex type.");
     using T = gko::remove_complex<ComplexType>;
     using c_type = gko::kernels::hip::hip_type<ComplexType>;
-    constexpr T inf = gko::device_numeric_limits<T>::inf;
-    constexpr T quiet_nan = NAN;
+    const T inf = gko::device_numeric_limits<T>::inf();
+    const auto quiet_nan = static_cast<T>(NAN);
     bool test_true{};
     bool test_false{};
 
@@ -118,6 +117,40 @@ TEST_F(IsFinite, Float) { ASSERT_TRUE(test_real_is_finite_kernel<float>()); }
 TEST_F(IsFinite, Double) { ASSERT_TRUE(test_real_is_finite_kernel<double>()); }
 
 
+#if GINKGO_ENABLE_HALF
+
+
+TEST_F(IsFinite, Half) { ASSERT_TRUE(test_real_is_finite_kernel<__half>()); }
+
+
+TEST_F(IsFinite, HalfComplex)
+{
+    ASSERT_TRUE(test_complex_is_finite_kernel<thrust::complex<__half>>());
+}
+
+
+#endif  // GINKGO_ENABLE_HALF
+
+
+#if GINKGO_ENABLE_BFLOAT16
+
+
+TEST_F(IsFinite, Bfloat16)
+{
+    ASSERT_TRUE(test_real_is_finite_kernel<gko::vendor_bf16>());
+}
+
+
+TEST_F(IsFinite, Bfloat16Complex)
+{
+    ASSERT_TRUE(
+        test_complex_is_finite_kernel<thrust::complex<gko::vendor_bf16>>());
+}
+
+
+#endif  // GINKGO_ENABLE_BFLOAT16
+
+
 TEST_F(IsFinite, FloatComplex)
 {
     ASSERT_TRUE(test_complex_is_finite_kernel<thrust::complex<float>>());
@@ -130,4 +163,4 @@ TEST_F(IsFinite, DoubleComplex)
 }
 
 
-}  // namespace
+}  // namespace gko

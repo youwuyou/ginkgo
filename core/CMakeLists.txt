@@ -1,7 +1,31 @@
 add_subdirectory(device_hooks) # placeholders for disabled modules
 
-add_library(ginkgo "")
-target_sources(ginkgo
+set(config_source
+    config/factorization_config.cpp
+    config/multigrid_config.cpp
+    config/preconditioner_config.cpp
+    config/preconditioner_ic_config.cpp
+    config/preconditioner_ilu_config.cpp
+    config/preconditioner_isai_config.cpp
+    config/registry.cpp
+    config/solver_config.cpp
+)
+if(GINKGO_BUILD_MPI)
+    list(APPEND config_source config/schwarz_config.cpp)
+endif()
+# MSVC: LNK1189 issue
+# CLANG in MSYS2 (MINGW): too many exported symbols
+# We separate the library as a workaround to solve this issue
+# To make ginkgo still be the major library, we make the original to ginkgo_core in MSVC/shared
+# TODO: should think another way to solve it like dllexport or def file
+set(ginkgo_core "ginkgo")
+if((MSVC OR MINGW) AND BUILD_SHARED_LIBS)
+    set(ginkgo_core "ginkgo_core")
+endif()
+
+add_library(${ginkgo_core} "")
+target_sources(
+    ${ginkgo_core}
     PRIVATE
     base/array.cpp
     base/batch_multi_vector.cpp
@@ -109,66 +133,107 @@ target_sources(ginkgo
     )
 
 if(GINKGO_HAVE_PAPI_SDE)
-    target_sources(ginkgo PRIVATE log/papi.cpp)
+    target_sources(${ginkgo_core} PRIVATE log/papi.cpp)
 endif()
 
 if(GINKGO_HAVE_METIS)
-    target_sources(ginkgo PRIVATE reorder/nested_dissection.cpp)
+    target_sources(${ginkgo_core} PRIVATE reorder/nested_dissection.cpp)
 endif()
 
 if(GINKGO_BUILD_MPI)
-    target_sources(ginkgo
+    target_sources(
+        ${ginkgo_core}
         PRIVATE
-        mpi/exception.cpp
-        distributed/matrix.cpp
-        distributed/partition_helpers.cpp
-        distributed/vector.cpp
-        distributed/preconditioner/schwarz.cpp)
+            distributed/assembly.cpp
+            distributed/collective_communicator.cpp
+            distributed/dense_communicator.cpp
+            distributed/matrix.cpp
+            distributed/neighborhood_communicator.cpp
+            distributed/partition_helpers.cpp
+            distributed/preconditioner/schwarz.cpp
+            distributed/row_gatherer.cpp
+            distributed/vector.cpp
+            distributed/vector_cache.cpp
+            mpi/exception.cpp
+    )
 endif()
 
-ginkgo_compile_features(ginkgo)
+# MSVC or CLANG/msys2 with shared: make ginkgo be the major library
+if((MSVC OR MINGW) AND BUILD_SHARED_LIBS)
+    add_library(ginkgo "")
+    target_sources(ginkgo PRIVATE ${config_source})
+    ginkgo_compile_features(ginkgo)
+    ginkgo_default_includes(ginkgo)
+    ginkgo_install_library(ginkgo)
+    if(GINKGO_CHECK_CIRCULAR_DEPS)
+        ginkgo_check_headers(ginkgo "")
+    endif()
+else()
+    target_sources(${ginkgo_core} PRIVATE ${config_source})
+endif()
+
+ginkgo_compile_features(${ginkgo_core})
 
 # add a namespace alias so Ginkgo can always be included as Ginkgo::ginkgo
 # regardless of whether it is installed or added as a subdirectory
 add_library(Ginkgo::ginkgo ALIAS ginkgo)
-target_link_libraries(ginkgo
-    PUBLIC ginkgo_device ginkgo_omp ginkgo_cuda ginkgo_reference ginkgo_hip ginkgo_dpcpp)
+if((MSVC OR MINGW) AND BUILD_SHARED_LIBS)
+    target_link_libraries(ginkgo PUBLIC ${ginkgo_core})
+endif()
+target_link_libraries(
+    ${ginkgo_core}
+    PUBLIC
+        ginkgo_device
+        ginkgo_omp
+        ginkgo_cuda
+        ginkgo_reference
+        ginkgo_hip
+        ginkgo_dpcpp
+)
 if(GINKGO_HAVE_PAPI_SDE)
-    target_link_libraries(ginkgo PUBLIC PAPI::PAPI_SDE)
+    target_link_libraries(${ginkgo_core} PUBLIC PAPI::PAPI_SDE)
 endif()
 
 if(GINKGO_HAVE_TAU)
-    target_link_libraries(ginkgo PRIVATE perfstubs)
+    target_link_libraries(${ginkgo_core} PRIVATE perfstubs)
 endif()
 
 if(GINKGO_HAVE_VTUNE)
-    target_link_libraries(ginkgo PRIVATE VTune::ITT)
+    target_link_libraries(${ginkgo_core} PRIVATE VTune::ITT)
 endif()
 
 if(GINKGO_HAVE_METIS)
-    target_link_libraries(ginkgo PRIVATE METIS::METIS)
+    target_link_libraries(${ginkgo_core} PRIVATE METIS::METIS)
 endif()
 
 if(GINKGO_BUILD_MPI)
-    target_link_libraries(ginkgo PUBLIC MPI::MPI_CXX)
+    target_link_libraries(${ginkgo_core} PUBLIC MPI::MPI_CXX)
 endif()
 
-ginkgo_default_includes(ginkgo)
-ginkgo_install_library(ginkgo)
+ginkgo_default_includes(${ginkgo_core})
+ginkgo_install_library(${ginkgo_core})
 
 if(GINKGO_CHECK_CIRCULAR_DEPS)
-    ginkgo_check_headers(ginkgo "")
+    ginkgo_check_headers(${ginkgo_core} "")
 endif()
 
 if(GINKGO_BUILD_TESTS)
     add_subdirectory(test)
 endif()
 
-if(GINKGO_DEVEL_TOOLS AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND BUILD_SHARED_LIBS)
+if(
+    GINKGO_DEVEL_TOOLS
+    AND CMAKE_SYSTEM_NAME STREQUAL "Linux"
+    AND BUILD_SHARED_LIBS
+)
     # Copy pretty-printer next to library
-    add_custom_command(TARGET ginkgo POST_BUILD
-        COMMAND "${CMAKE_COMMAND}" -E copy
-        "${Ginkgo_SOURCE_DIR}/dev_tools/scripts/gdb-ginkgo.py"
-        "$<TARGET_FILE:ginkgo>-gdb.py"
-        COMMENT "Copying pretty-printer to output directory")
+    add_custom_command(
+        TARGET ${ginkgo_core}
+        POST_BUILD
+        COMMAND
+            "${CMAKE_COMMAND}" -E copy
+            "${Ginkgo_SOURCE_DIR}/dev_tools/scripts/gdb-ginkgo.py"
+            "$<TARGET_FILE:ginkgo>-gdb.py"
+        COMMENT "Copying pretty-printer to output directory"
+    )
 endif()

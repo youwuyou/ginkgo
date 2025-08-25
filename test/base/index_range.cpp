@@ -1,20 +1,20 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <memory>
+/*@GKO_PREPROCESSOR_FILENAME_HELPER@*/
 
+#include "core/base/index_range.hpp"
+
+#include <memory>
 
 #include <gtest/gtest.h>
 
-
 #include <ginkgo/core/base/array.hpp>
 
-
 #include "common/unified/base/kernel_launch.hpp"
-#include "core/base/index_range.hpp"
 #include "core/test/utils.hpp"
-#include "test/utils/executor.hpp"
+#include "test/utils/common_fixture.hpp"
 
 
 class IndexRange : public CommonTestFixture {
@@ -30,7 +30,7 @@ public:
 void run_range_for(std::shared_ptr<gko::EXEC_TYPE> exec,
                    gko::array<int>& result_array)
 {
-    gko::kernels::EXEC_NAMESPACE::run_kernel(
+    gko::kernels::GKO_DEVICE_NAMESPACE::run_kernel(
         exec,
         [] GKO_KERNEL(auto i, auto result, auto size) {
             for (auto i : gko::irange<int>{size}) {

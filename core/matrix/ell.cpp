@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/matrix/ell.hpp>
-
+#include "ginkgo/core/matrix/ell.hpp"
 
 #include <algorithm>
-
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -16,7 +14,6 @@
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/base/allocator.hpp"
 #include "core/base/array_access.hpp"
@@ -173,6 +170,50 @@ void Ell<ValueType, IndexType>::move_to(
 {
     this->convert_to(result);
 }
+
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::convert_to(
+    Ell<next_precision<ValueType, 2>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->col_idxs_ = this->col_idxs_;
+    result->num_stored_elements_per_row_ = this->num_stored_elements_per_row_;
+    result->stride_ = this->stride_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::move_to(
+    Ell<next_precision<ValueType, 2>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::convert_to(
+    Ell<next_precision<ValueType, 3>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->col_idxs_ = this->col_idxs_;
+    result->num_stored_elements_per_row_ = this->num_stored_elements_per_row_;
+    result->stride_ = this->stride_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::move_to(
+    Ell<next_precision<ValueType, 3>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
 
 
 template <typename ValueType, typename IndexType>
@@ -378,10 +419,10 @@ Ell<ValueType, IndexType>::Ell(std::shared_ptr<const Executor> exec,
                                size_type num_stored_elements_per_row,
                                size_type stride)
     : EnableLinOp<Ell>(exec, size),
+      num_stored_elements_per_row_(num_stored_elements_per_row),
       stride_(stride == 0 ? size[0] : stride),
       values_(exec, stride_ * num_stored_elements_per_row),
-      col_idxs_(exec, stride_ * num_stored_elements_per_row),
-      num_stored_elements_per_row_(num_stored_elements_per_row)
+      col_idxs_(exec, stride_ * num_stored_elements_per_row)
 {}
 
 
@@ -392,10 +433,10 @@ Ell<ValueType, IndexType>::Ell(std::shared_ptr<const Executor> exec,
                                size_type num_stored_elements_per_row,
                                size_type stride)
     : EnableLinOp<Ell>(exec, size),
-      values_{exec, std::move(values)},
-      col_idxs_{exec, std::move(col_idxs)},
       num_stored_elements_per_row_{num_stored_elements_per_row},
-      stride_{stride}
+      stride_{stride},
+      values_{exec, std::move(values)},
+      col_idxs_{exec, std::move(col_idxs)}
 {
     GKO_ASSERT_EQ(num_stored_elements_per_row_ * stride_, values_.get_size());
     GKO_ASSERT_EQ(num_stored_elements_per_row_ * stride_, col_idxs_.get_size());

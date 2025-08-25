@@ -1,9 +1,8 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/matrix/sellp.hpp>
-
+#include "ginkgo/core/matrix/sellp.hpp"
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -12,7 +11,6 @@
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/base/allocator.hpp"
 #include "core/base/array_access.hpp"
@@ -196,6 +194,54 @@ void Sellp<ValueType, IndexType>::move_to(
 {
     this->convert_to(result);
 }
+
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Sellp<ValueType, IndexType>::convert_to(
+    Sellp<next_precision<ValueType, 2>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->col_idxs_ = this->col_idxs_;
+    result->slice_lengths_ = this->slice_lengths_;
+    result->slice_sets_ = this->slice_sets_;
+    result->slice_size_ = this->slice_size_;
+    result->stride_factor_ = this->stride_factor_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Sellp<ValueType, IndexType>::move_to(
+    Sellp<next_precision<ValueType, 2>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Sellp<ValueType, IndexType>::convert_to(
+    Sellp<next_precision<ValueType, 3>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->col_idxs_ = this->col_idxs_;
+    result->slice_lengths_ = this->slice_lengths_;
+    result->slice_sets_ = this->slice_sets_;
+    result->slice_size_ = this->slice_size_;
+    result->stride_factor_ = this->stride_factor_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Sellp<ValueType, IndexType>::move_to(
+    Sellp<next_precision<ValueType, 3>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
 
 
 template <typename ValueType, typename IndexType>

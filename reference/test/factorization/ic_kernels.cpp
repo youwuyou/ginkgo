@@ -1,28 +1,36 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/factorization/ic.hpp>
-
-
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <vector>
-
 
 #include <gtest/gtest.h>
 
-
 #include <ginkgo/core/base/executor.hpp>
+#include <ginkgo/core/factorization/ic.hpp>
+#include <ginkgo/core/log/logger.hpp>
 #include <ginkgo/core/matrix/coo.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 
-
 #include "core/test/utils.hpp"
 
 
-namespace {
+struct CheckOperationLogger : gko::log::Logger {
+    void on_operation_launched(const gko::Executor*,
+                               const gko::Operation* op) const override
+    {
+        std::string s = op->get_name();
+        if (s.find("sparselib") != std::string::npos) {
+            contains_sparselib = true;
+        }
+    }
+
+    mutable bool contains_sparselib = false;
+};
 
 
 class DummyLinOp : public gko::EnableLinOp<DummyLinOp>,
@@ -77,7 +85,7 @@ protected:
           tol{r<value_type>::value}
     {}
 
-    std::shared_ptr<const gko::ReferenceExecutor> ref;
+    std::shared_ptr<gko::ReferenceExecutor> ref;
     std::shared_ptr<const gko::Executor> exec;
     std::shared_ptr<Csr> identity;
     std::shared_ptr<Csr> banded;
@@ -123,6 +131,40 @@ TYPED_TEST(Ic, SetStrategy)
               l_strategy->get_name());
     ASSERT_EQ(fact->get_lt_factor()->get_strategy()->get_name(),
               l_strategy->get_name());
+}
+
+
+TYPED_TEST(Ic, UsesSyncFreeAlgorithm)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    auto logger = std::make_shared<CheckOperationLogger>();
+    this->ref->add_logger(logger);
+
+    auto fact =
+        gko::factorization::Ic<value_type, index_type>::build()
+            .with_algorithm(gko::factorization::incomplete_algorithm::syncfree)
+            .on(this->ref)
+            ->generate(this->mtx_system);
+
+    ASSERT_FALSE(logger->contains_sparselib);
+}
+
+
+TYPED_TEST(Ic, UsesSparseLibAlgorithm)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    auto logger = std::make_shared<CheckOperationLogger>();
+    this->ref->add_logger(logger);
+
+    auto fact =
+        gko::factorization::Ic<value_type, index_type>::build()
+            .with_algorithm(gko::factorization::incomplete_algorithm::sparselib)
+            .on(this->ref)
+            ->generate(this->mtx_system);
+
+    ASSERT_TRUE(logger->contains_sparselib);
 }
 
 
@@ -193,4 +235,98 @@ TYPED_TEST(Ic, GenerateGeneral)
 }
 
 
-}  // namespace
+TYPED_TEST(Ic, GenerateGeneralBySyncfree)
+{
+    using factorization_type = typename TestFixture::factorization_type;
+    using Csr = typename TestFixture::Csr;
+
+    auto fact =
+        factorization_type::build()
+            .with_algorithm(gko::factorization::incomplete_algorithm::syncfree)
+            .on(this->exec)
+            ->generate(this->mtx_system);
+
+    GKO_ASSERT_MTX_NEAR(fact->get_l_factor(), this->mtx_l_it_expect, this->tol);
+    GKO_ASSERT_MTX_NEAR(fact->get_lt_factor(),
+                        gko::as<Csr>(this->mtx_l_it_expect->conj_transpose()),
+                        this->tol);
+}
+
+
+TYPED_TEST(Ic, GenerateIcWithBitmapIsEquivalentToRefBySyncfree)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Csr = typename TestFixture::Csr;
+    // diag + full first row and column
+    // the third and forth row use bitmap for lookup table
+    auto mtx = gko::share(gko::initialize<Csr>({{1.0, 1.0, 1.0, 1.0},
+                                                {1.0, 2.0, 0.0, 0.0},
+                                                {1.0, 0.0, 2.0, 0.0},
+                                                {1.0, 0.0, 0.0, 2.0}},
+                                               this->ref));
+    auto result_l = gko::initialize<Csr>({{1.0, 0.0, 0.0, 0.0},
+                                          {1.0, 1.0, 0.0, 0.0},
+                                          {1.0, 0.0, 1.0, 0.0},
+                                          {1.0, 0.0, 0.0, 1.0}},
+                                         this->ref);
+    auto result_lt = gko::as<Csr>(result_l->conj_transpose());
+    auto factory =
+        gko::factorization::Ic<value_type, index_type>::build()
+            .with_algorithm(gko::factorization::incomplete_algorithm::syncfree)
+            .on(this->ref);
+
+    auto ic = factory->generate(mtx);
+
+    GKO_ASSERT_MTX_EQ_SPARSITY(ic->get_l_factor(), result_l);
+    GKO_ASSERT_MTX_NEAR(ic->get_l_factor(), result_l, this->tol);
+    GKO_ASSERT_MTX_EQ_SPARSITY(ic->get_lt_factor(), result_lt);
+    GKO_ASSERT_MTX_NEAR(ic->get_lt_factor(), result_lt, this->tol);
+}
+
+
+TYPED_TEST(Ic, GenerateIcWithHashmapIsEquivalentToRefBySyncfree)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    using Csr = typename TestFixture::Csr;
+    int n = 68;
+    gko::matrix_data<value_type, index_type> data(gko::dim<2>(n, n));
+    gko::matrix_data<value_type, index_type> result(gko::dim<2>(n, n));
+    for (int i = 0; i < n; i++) {
+        if (i == n - 2 || i == n - 3) {
+            data.nonzeros.emplace_back(i, i, value_type{2});
+        } else {
+            data.nonzeros.emplace_back(i, i, gko::one<value_type>());
+        }
+        result.nonzeros.emplace_back(i, i, gko::one<value_type>());
+    }
+    // the following rows use hashmap for lookup table
+    // add dependence
+    data.nonzeros.emplace_back(n - 3, 0, gko::one<value_type>());
+    data.nonzeros.emplace_back(0, n - 3, gko::one<value_type>());
+    // add a entry whose col idx is not shown in the above row
+    data.nonzeros.emplace_back(0, n - 2, gko::one<value_type>());
+    data.nonzeros.emplace_back(n - 2, 0, gko::one<value_type>());
+    data.sort_row_major();
+    auto mtx = gko::share(Csr::create(this->ref));
+    mtx->read(data);
+    // prepare result (lower triangular part)
+    result.nonzeros.emplace_back(n - 3, 0, gko::one<value_type>());
+    result.nonzeros.emplace_back(n - 2, 0, gko::one<value_type>());
+    result.sort_row_major();
+    auto result_l = gko::share(Csr::create(this->ref));
+    result_l->read(result);
+    auto result_lt = gko::as<Csr>(result_l->conj_transpose());
+    auto factory =
+        gko::factorization::Ic<value_type, index_type>::build()
+            .with_algorithm(gko::factorization::incomplete_algorithm::syncfree)
+            .on(this->ref);
+
+    auto ic = factory->generate(mtx);
+
+    GKO_ASSERT_MTX_EQ_SPARSITY(ic->get_l_factor(), result_l);
+    GKO_ASSERT_MTX_NEAR(ic->get_l_factor(), result_l, this->tol);
+    GKO_ASSERT_MTX_EQ_SPARSITY(ic->get_lt_factor(), result_lt);
+    GKO_ASSERT_MTX_NEAR(ic->get_lt_factor(), result_lt, this->tol);
+}

@@ -1,13 +1,11 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/base/batch_multi_vector.hpp>
-
+#include "ginkgo/core/base/batch_multi_vector.hpp"
 
 #include <algorithm>
 #include <type_traits>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/exception.hpp>
@@ -17,7 +15,6 @@
 #include <ginkgo/core/base/matrix_data.hpp>
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/matrix/batch_dense.hpp>
-
 
 #include "core/base/batch_multi_vector_kernels.hpp"
 
@@ -297,6 +294,44 @@ void MultiVector<ValueType>::move_to(
 {
     this->convert_to(result);
 }
+
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+template <typename ValueType>
+void MultiVector<ValueType>::convert_to(
+    MultiVector<next_precision<ValueType, 2>>* result) const
+{
+    result->values_ = this->values_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType>
+void MultiVector<ValueType>::move_to(
+    MultiVector<next_precision<ValueType, 2>>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+template <typename ValueType>
+void MultiVector<ValueType>::convert_to(
+    MultiVector<next_precision<ValueType, 3>>* result) const
+{
+    result->values_ = this->values_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType>
+void MultiVector<ValueType>::move_to(
+    MultiVector<next_precision<ValueType, 3>>* result)
+{
+    this->convert_to(result);
+}
+#endif
 
 
 #define GKO_DECLARE_BATCH_MULTI_VECTOR(_type) class MultiVector<_type>

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,7 +8,6 @@
 
 #include <initializer_list>
 #include <type_traits>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
@@ -30,7 +29,15 @@ template <typename ValueType>
 class Vector;
 
 
-}
+namespace detail {
+
+
+template <typename ValueType>
+class VectorCache;
+
+
+}  // namespace detail
+}  // namespace distributed
 }  // namespace experimental
 
 
@@ -81,6 +88,12 @@ template <typename ValueType = default_precision>
 class Dense
     : public EnableLinOp<Dense<ValueType>>,
       public ConvertibleTo<Dense<next_precision<ValueType>>>,
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Dense<next_precision<ValueType, 2>>>,
+#endif
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Dense<next_precision<ValueType, 3>>>,
+#endif
       public ConvertibleTo<Coo<ValueType, int32>>,
       public ConvertibleTo<Coo<ValueType, int64>>,
       public ConvertibleTo<Csr<ValueType, int32>>,
@@ -123,6 +136,7 @@ class Dense
     friend class SparsityCsr<ValueType, int64>;
     friend class Dense<to_complex<ValueType>>;
     friend class experimental::distributed::Vector<ValueType>;
+    friend class experimental::distributed::detail::VectorCache<ValueType>;
 
 public:
     using EnableLinOp<Dense>::convert_to;
@@ -268,11 +282,31 @@ public:
         return other->create_const_view_of_impl();
     }
 
-    friend class Dense<next_precision<ValueType>>;
+    friend class Dense<previous_precision<ValueType>>;
 
     void convert_to(Dense<next_precision<ValueType>>* result) const override;
 
     void move_to(Dense<next_precision<ValueType>>* result) override;
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+    friend class Dense<previous_precision<ValueType, 2>>;
+    using ConvertibleTo<Dense<next_precision<ValueType, 2>>>::convert_to;
+    using ConvertibleTo<Dense<next_precision<ValueType, 2>>>::move_to;
+
+    void convert_to(Dense<next_precision<ValueType, 2>>* result) const override;
+
+    void move_to(Dense<next_precision<ValueType, 2>>* result) override;
+#endif
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+    friend class Dense<previous_precision<ValueType, 3>>;
+    using ConvertibleTo<Dense<next_precision<ValueType, 3>>>::convert_to;
+    using ConvertibleTo<Dense<next_precision<ValueType, 3>>>::move_to;
+
+    void convert_to(Dense<next_precision<ValueType, 3>>* result) const override;
+
+    void move_to(Dense<next_precision<ValueType, 3>>* result) override;
+#endif
 
     void convert_to(Coo<ValueType, int32>* result) const override;
 
@@ -1111,6 +1145,24 @@ public:
     std::unique_ptr<Dense> create_submatrix(const span& rows,
                                             const span& columns)
     {
+        return create_submatrix(rows, columns, this->get_stride());
+    }
+
+
+    /**
+     * Create a submatrix from the original matrix.
+     *
+     * @param rows  row span
+     * @param columns  column span
+     * @param size  size of the submatrix (only used for consistency with
+     *              distributed::Vector)
+     */
+    std::unique_ptr<Dense> create_submatrix(const local_span& rows,
+                                            const local_span& columns,
+                                            dim<2> size)
+    {
+        dim<2> deduced_size{rows.length(), columns.length()};
+        GKO_ASSERT_EQUAL_DIMENSIONS(deduced_size, size);
         return create_submatrix(rows, columns, this->get_stride());
     }
 

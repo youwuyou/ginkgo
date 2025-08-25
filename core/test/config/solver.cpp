@@ -1,13 +1,12 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include <typeinfo>
 
-
 #include <gtest/gtest.h>
 
-
+#include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/config/config.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
@@ -16,15 +15,17 @@
 #include <ginkgo/core/solver/cb_gmres.hpp>
 #include <ginkgo/core/solver/cg.hpp>
 #include <ginkgo/core/solver/cgs.hpp>
+#include <ginkgo/core/solver/chebyshev.hpp>
 #include <ginkgo/core/solver/direct.hpp>
 #include <ginkgo/core/solver/fcg.hpp>
 #include <ginkgo/core/solver/gcr.hpp>
 #include <ginkgo/core/solver/gmres.hpp>
 #include <ginkgo/core/solver/idr.hpp>
 #include <ginkgo/core/solver/ir.hpp>
+#include <ginkgo/core/solver/minres.hpp>
+#include <ginkgo/core/solver/pipe_cg.hpp>
 #include <ginkgo/core/solver/triangular.hpp>
 #include <ginkgo/core/stop/iteration.hpp>
-
 
 #include "core/config/config_helper.hpp"
 #include "core/config/registry_accessor.hpp"
@@ -124,6 +125,15 @@ struct Fcg
     static pnode::map_type setup_base()
     {
         return {{"type", pnode{"solver::Fcg"}}};
+    }
+};
+
+
+struct PipeCg : SolverConfigTest<gko::solver::PipeCg<float>,
+                                 gko::solver::PipeCg<double>> {
+    static pnode::map_type setup_base()
+    {
+        return {{"type", pnode{"solver::PipeCg"}}};
     }
 };
 
@@ -292,6 +302,8 @@ struct Gmres
         param.with_krylov_dim(3u);
         config_map["flexible"] = pnode{true};
         param.with_flexible(true);
+        config_map["ortho_method"] = pnode{"cgs"};
+        param.with_ortho_method(gko::solver::gmres::ortho_method::cgs);
     }
 
     template <bool from_reg, typename AnswerType>
@@ -303,6 +315,7 @@ struct Gmres
         solver_config_test::template validate<from_reg>(result, answer);
         ASSERT_EQ(res_param.krylov_dim, ans_param.krylov_dim);
         ASSERT_EQ(res_param.flexible, ans_param.flexible);
+        ASSERT_EQ(res_param.ortho_method, ans_param.ortho_method);
     }
 };
 
@@ -336,6 +349,15 @@ struct CbGmres : SolverConfigTest<gko::solver::CbGmres<float>,
         solver_config_test::template validate<from_reg>(result, answer);
         ASSERT_EQ(res_param.krylov_dim, ans_param.krylov_dim);
         ASSERT_EQ(res_param.storage_precision, ans_param.storage_precision);
+    }
+};
+
+
+struct Minres : SolverConfigTest<gko::solver::Minres<float>,
+                                 gko::solver::Minres<double>> {
+    static pnode::map_type setup_base()
+    {
+        return {{"type", pnode{"solver::Minres"}}};
     }
 };
 
@@ -439,6 +461,41 @@ struct UpperTrs : TrsHelper<gko::solver::UpperTrs> {
 };
 
 
+struct Chebyshev : SolverConfigTest<gko::solver::Chebyshev<float>,
+                                    gko::solver::Chebyshev<double>> {
+    static pnode::map_type setup_base()
+    {
+        return {{"type", pnode{"solver::Chebyshev"}}};
+    }
+
+    template <bool from_reg, typename ParamType>
+    static void set(pnode::map_type& config_map, ParamType& param, registry reg,
+                    std::shared_ptr<const gko::Executor> exec)
+    {
+        solver_config_test::template set<from_reg>(config_map, param, reg,
+                                                   exec);
+        using fvt = typename decltype(param.foci)::first_type;
+        config_map["foci"] =
+            pnode{pnode::array_type{pnode{fvt{0.5}}, pnode{fvt{1.5}}}};
+        param.with_foci(fvt{0.5}, fvt{1.5});
+        config_map["default_initial_guess"] = pnode{"zero"};
+        param.with_default_initial_guess(gko::solver::initial_guess_mode::zero);
+    }
+
+    template <bool from_reg, typename AnswerType>
+    static void validate(gko::LinOpFactory* result, AnswerType* answer)
+    {
+        auto res_param = gko::as<AnswerType>(result)->get_parameters();
+        auto ans_param = answer->get_parameters();
+
+        solver_config_test::template validate<from_reg>(result, answer);
+        ASSERT_EQ(res_param.foci, ans_param.foci);
+        ASSERT_EQ(res_param.default_initial_guess,
+                  ans_param.default_initial_guess);
+    }
+};
+
+
 template <typename T>
 class Solver : public ::testing::Test {
 protected:
@@ -467,8 +524,9 @@ protected:
 
 
 using SolverTypes =
-    ::testing::Types<::Cg, ::Fcg, ::Cgs, ::Bicg, ::Bicgstab, ::Ir, ::Idr, ::Gcr,
-                     ::Gmres, ::CbGmres, ::Direct, ::LowerTrs, ::UpperTrs>;
+    ::testing::Types<::Cg, ::Fcg, ::Cgs, ::PipeCg, ::Bicg, ::Bicgstab, ::Ir,
+                     ::Idr, ::Gcr, ::Gmres, ::CbGmres, ::Minres, ::Direct,
+                     ::LowerTrs, ::UpperTrs>;
 
 
 TYPED_TEST_SUITE(Solver, SolverTypes, TypenameNameGenerator);
@@ -483,6 +541,18 @@ TYPED_TEST(Solver, CreateDefault)
     auto ans = Config::default_solver_type::build().on(this->exec);
 
     Config::template validate<true>(res.get(), ans.get());
+}
+
+
+TYPED_TEST(Solver, ThrowWhenKeyIsNotAllowed)
+{
+    using Config = typename TestFixture::Config;
+    auto pnode_map = Config::setup_base();
+    pnode_map["invalid_key"] = pnode{""};
+    auto config = pnode(pnode_map);
+
+    ASSERT_THROW(parse(config, this->reg, this->td).on(this->exec),
+                 gko::InvalidStateError);
 }
 
 

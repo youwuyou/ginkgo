@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,7 +8,6 @@
 
 #include <initializer_list>
 #include <vector>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/batch_lin_op.hpp>
@@ -47,10 +46,16 @@ namespace matrix {
 template <typename ValueType = default_precision, typename IndexType = int32>
 class Csr final
     : public EnableBatchLinOp<Csr<ValueType, IndexType>>,
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Csr<next_precision<ValueType, 2>, IndexType>>,
+#endif
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Csr<next_precision<ValueType, 3>, IndexType>>,
+#endif
       public ConvertibleTo<Csr<next_precision<ValueType>, IndexType>> {
     friend class EnablePolymorphicObject<Csr, BatchLinOp>;
     friend class Csr<to_complex<ValueType>, IndexType>;
-    friend class Csr<next_precision<ValueType>, IndexType>;
+    friend class Csr<previous_precision<ValueType>, IndexType>;
     static_assert(std::is_same<IndexType, int32>::value,
                   "IndexType must be a 32 bit integer");
 
@@ -68,6 +73,30 @@ public:
         Csr<next_precision<ValueType>, IndexType>* result) const override;
 
     void move_to(Csr<next_precision<ValueType>, IndexType>* result) override;
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+    friend class Csr<previous_precision<ValueType, 2>, IndexType>;
+    using ConvertibleTo<
+        Csr<next_precision<ValueType, 2>, IndexType>>::convert_to;
+    using ConvertibleTo<Csr<next_precision<ValueType, 2>, IndexType>>::move_to;
+
+    void convert_to(
+        Csr<next_precision<ValueType, 2>, IndexType>* result) const override;
+
+    void move_to(Csr<next_precision<ValueType, 2>, IndexType>* result) override;
+#endif
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+    friend class Csr<previous_precision<ValueType, 3>, IndexType>;
+    using ConvertibleTo<
+        Csr<next_precision<ValueType, 3>, IndexType>>::convert_to;
+    using ConvertibleTo<Csr<next_precision<ValueType, 3>, IndexType>>::move_to;
+
+    void convert_to(
+        Csr<next_precision<ValueType, 3>, IndexType>* result) const override;
+
+    void move_to(Csr<next_precision<ValueType, 3>, IndexType>* result) override;
+#endif
 
     /**
      * Creates a mutable view (of matrix::Csr type) of one item of the

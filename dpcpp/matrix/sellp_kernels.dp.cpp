@@ -1,19 +1,16 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/sellp_kernels.hpp"
 
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/components/prefix_sum_kernels.hpp"
 #include "dpcpp/base/config.hpp"
@@ -96,7 +93,9 @@ void advanced_spmv_kernel(size_type num_rows, size_type num_right_hand_sides,
             }
         }
         c[row * c_stride + column_id] =
-            beta[0] * c[row * c_stride + column_id] + alpha[0] * val;
+            is_zero(beta[0])
+                ? alpha[0] * val
+                : alpha[0] * val + beta[0] * c[row * c_stride + column_id];
     }
 }
 

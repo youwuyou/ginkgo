@@ -1,25 +1,21 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-// force-top: on
+// clang-format off
 // prevent compilation failure related to disappearing assert(...) statements
 #include <hip/hip_runtime.h>
-// force-top: off
-
-
-#include <ginkgo/core/base/executor.hpp>
+// clang-format on
 
 
 #include <memory>
 #include <type_traits>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
+#include <ginkgo/core/base/executor.hpp>
 
 #include "common/cuda_hip/base/executor.hpp.inc"
 #include "hip/base/scoped_device_id.hip.hpp"
@@ -55,7 +51,7 @@ public:
 
     void run(std::shared_ptr<const gko::HipExecutor>) const override
     {
-        hipGetDevice(&value);
+        GKO_ASSERT_NO_HIP_ERRORS(hipGetDevice(&value));
     }
 
     int& value;
@@ -128,7 +124,7 @@ TEST_F(HipExecutor, CanInstantiateTwoExecutorsOnOneDevice)
 TEST_F(HipExecutor, MasterKnowsNumberOfDevices)
 {
     int count = 0;
-    hipGetDeviceCount(&count);
+    GKO_ASSERT_NO_HIP_ERRORS(hipGetDeviceCount(&count));
 
     auto num_devices = gko::HipExecutor::get_num_devices();
 

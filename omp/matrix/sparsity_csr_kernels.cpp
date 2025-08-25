@@ -1,22 +1,18 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/sparsity_csr_kernels.hpp"
 
-
 #include <algorithm>
 #include <numeric>
 #include <utility>
 
-
 #include <omp.h>
-
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/base/mixed_precision_types.hpp"
 #include "core/components/fill_array_kernels.hpp"
@@ -93,7 +89,9 @@ void advanced_spmv(std::shared_ptr<const OmpExecutor> exec,
                     val * static_cast<arithmetic_type>(b->at(col_idxs[k], j));
             }
             c->at(row, j) = static_cast<OutputValueType>(
-                vbeta * static_cast<arithmetic_type>(c->at(row, j)) +
+                (is_zero(vbeta)
+                     ? zero(vbeta)
+                     : vbeta * static_cast<arithmetic_type>(c->at(row, j))) +
                 valpha * temp_val);
         }
     }
@@ -187,11 +185,14 @@ void is_sorted_by_column_index(
     bool local_is_sorted = true;
 #pragma omp parallel for shared(local_is_sorted)
     for (size_type i = 0; i < size[0]; ++i) {
-#pragma omp flush(local_is_sorted)
         // Skip comparison if any thread detects that it is not sorted
-        if (local_is_sorted) {
+        bool sync_local_is_sorted = true;
+#pragma omp atomic read
+        sync_local_is_sorted = local_is_sorted;
+        if (sync_local_is_sorted) {
             for (auto idx = row_ptrs[i] + 1; idx < row_ptrs[i + 1]; ++idx) {
                 if (col_idxs[idx - 1] > col_idxs[idx]) {
+#pragma omp atomic write
                     local_is_sorted = false;
                     break;
                 }

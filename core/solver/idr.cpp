@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/solver/idr.hpp>
+#include "ginkgo/core/solver/idr.hpp"
 
+#include <string>
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
@@ -12,12 +13,11 @@
 #include <ginkgo/core/base/precision_dispatch.hpp>
 #include <ginkgo/core/solver/solver_base.hpp>
 
-
+#include "core/config/config_helper.hpp"
 #include "core/config/solver_config.hpp"
 #include "core/distributed/helpers.hpp"
 #include "core/solver/idr_kernels.hpp"
 #include "core/solver/solver_boilerplate.hpp"
-
 
 namespace gko {
 namespace solver {
@@ -42,20 +42,21 @@ typename Idr<ValueType>::parameters_type Idr<ValueType>::parse(
     const config::type_descriptor& td_for_child)
 {
     auto params = solver::Idr<ValueType>::build();
-    common_solver_parse(params, config, context, td_for_child);
-    if (auto& obj = config.get("subspace_dim")) {
-        params.with_subspace_dim(gko::config::get_value<size_type>(obj));
+    config::config_check_decorator config_check(config);
+    config::common_solver_parse(params, config_check, context, td_for_child);
+    if (auto& obj = config_check.get("subspace_dim")) {
+        params.with_subspace_dim(config::get_value<size_type>(obj));
     }
-    if (auto& obj = config.get("kappa")) {
-        params.with_kappa(
-            gko::config::get_value<remove_complex<ValueType>>(obj));
+    if (auto& obj = config_check.get("kappa")) {
+        params.with_kappa(config::get_value<remove_complex<ValueType>>(obj));
     }
-    if (auto& obj = config.get("deterministic")) {
-        params.with_deterministic(gko::config::get_value<bool>(obj));
+    if (auto& obj = config_check.get("deterministic")) {
+        params.with_deterministic(config::get_value<bool>(obj));
     }
-    if (auto& obj = config.get("complex_subspace")) {
-        params.with_complex_subspace(gko::config::get_value<bool>(obj));
+    if (auto& obj = config_check.get("complex_subspace")) {
+        params.with_complex_subspace(config::get_value<bool>(obj));
     }
+
     return params;
 }
 
@@ -67,6 +68,10 @@ std::unique_ptr<LinOp> Idr<ValueType>::transpose() const
         .with_generated_preconditioner(
             share(as<Transposable>(this->get_preconditioner())->transpose()))
         .with_criteria(this->get_stop_criterion_factory())
+        .with_subspace_dim(this->get_subspace_dim())
+        .with_kappa(this->get_kappa())
+        .with_deterministic(this->get_deterministic())
+        .with_complex_subspace(this->get_complex_subspace())
         .on(this->get_executor())
         ->generate(
             share(as<Transposable>(this->get_system_matrix())->transpose()));
@@ -80,6 +85,10 @@ std::unique_ptr<LinOp> Idr<ValueType>::conj_transpose() const
         .with_generated_preconditioner(share(
             as<Transposable>(this->get_preconditioner())->conj_transpose()))
         .with_criteria(this->get_stop_criterion_factory())
+        .with_subspace_dim(this->get_subspace_dim())
+        .with_kappa(this->get_kappa())
+        .with_deterministic(this->get_deterministic())
+        .with_complex_subspace(this->get_complex_subspace())
         .on(this->get_executor())
         ->generate(share(
             as<Transposable>(this->get_system_matrix())->conj_transpose()));
@@ -274,7 +283,9 @@ void Idr<ValueType>::iterate(const VectorType* dense_b,
 
         // omega = (t^H * residual) / (t^H * t)
         // rho = (t^H * residual) / (norm(t) * norm(residual))
-        // if abs(rho) < kappa then
+        // if norm(t) is zero then
+        //     omega = 0
+        // else if abs(rho) < kappa then
         //     omega *= kappa / abs(rho)
         // end if
         // residual -= omega * t

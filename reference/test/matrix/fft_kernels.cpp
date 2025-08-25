@@ -1,22 +1,17 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
-
-#include <ginkgo/core/matrix/fft.hpp>
-
 
 #include <complex>
 #include <memory>
 #include <random>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
+#include <ginkgo/core/matrix/fft.hpp>
 
 #include "core/test/utils.hpp"
 #include "matrices/config.hpp"
@@ -44,9 +39,15 @@ protected:
     Fft()
         : exec(gko::ReferenceExecutor::create()),
           rng{7381},
+#ifdef GINKGO_FAST_TESTS
+          n1{4},
+          n2{4},
+          n3{8},
+#else
           n1{4},
           n2{8},
           n3{16},
+#endif
           n{n1 * n2 * n3},
           nrhs{6},
           subcols{3},
@@ -153,7 +154,7 @@ protected:
     std::unique_ptr<Vec> dense_ifft3;
 };
 
-TYPED_TEST_SUITE(Fft, gko::test::ComplexValueTypes, TypenameNameGenerator);
+TYPED_TEST_SUITE(Fft, gko::test::ComplexValueTypesBase, TypenameNameGenerator);
 
 
 TYPED_TEST(Fft, ThrowsOnNonPowerOfTwo1D)

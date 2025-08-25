@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -7,7 +7,6 @@
 
 
 #include <type_traits>
-
 
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/base/types.hpp>
@@ -132,6 +131,13 @@ GKO_ATTRIBUTES GKO_INLINE constexpr bool operator!=(const span& first,
 {
     return !(first == second);
 }
+
+/**
+ * A span that is used exclusively for local numbering.
+ */
+struct local_span : span {
+    using span::span;
+};
 
 
 namespace detail {

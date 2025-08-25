@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,9 +8,7 @@
 #include <random>
 #include <vector>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/matrix_data.hpp>
 #include <ginkgo/core/base/name_demangling.hpp>
@@ -30,11 +28,10 @@
 #include <ginkgo/core/solver/multigrid.hpp>
 #include <ginkgo/core/stop/residual_norm.hpp>
 
-
 #include "core/test/utils.hpp"
 #include "core/test/utils/matrix_generator.hpp"
 #include "core/utils/matrix_utils.hpp"
-#include "test/utils/mpi/executor.hpp"
+#include "test/utils/mpi/common_fixture.hpp"
 
 
 #if GINKGO_DPCPP_SINGLE_MODE
@@ -48,7 +45,7 @@ template <typename SolverType>
 struct SimpleSolverTest {
     using solver_type = SolverType;
     using value_type = typename solver_type::value_type;
-    using mixed_value_type = gko::next_precision<value_type>;
+    using mixed_value_type = gko::next_precision_base<value_type>;
     using local_index_type = gko::int32;
     using global_index_type = gko::int64;
     using dist_matrix_type =
@@ -141,11 +138,7 @@ struct CgWithMg : SimpleSolverTest<gko::solver::Cg<solver_value_type>> {
                         16u)  // necessary since the test matrices have less
                               // rows than the default value
                     .with_criteria(
-                        gko::stop::Iteration::build().with_max_iters(
-                            iteration_count()),
-                        gko::stop::ResidualNorm<value_type>::build()
-                            .with_baseline(gko::stop::mode::absolute)
-                            .with_reduction_factor(2 * reduction_factor())));
+                        gko::stop::Iteration::build().with_max_iters(1u)));
     }
 
     static bool blacklisted(const std::string& test)
@@ -198,13 +191,14 @@ struct Ir : SimpleSolverTest<gko::solver::Ir<solver_value_type>> {
 };
 
 
-template <unsigned dimension>
+template <unsigned dimension, gko::solver::gmres::ortho_method ortho>
 struct Gmres : SimpleSolverTest<gko::solver::Gmres<solver_value_type>> {
     static typename solver_type::parameters_type build(
         std::shared_ptr<const gko::Executor> exec)
     {
         return SimpleSolverTest<gko::solver::Gmres<solver_value_type>>::build(
                    std::move(exec))
+            .with_ortho_method(ortho)
             .with_krylov_dim(dimension);
     }
 };
@@ -231,7 +225,7 @@ protected:
     using local_index_type = typename T::local_index_type;
     using global_index_type = typename T::global_index_type;
     using value_type = typename T::value_type;
-    using mixed_value_type = gko::next_precision<value_type>;
+    using mixed_value_type = gko::next_precision_base<value_type>;
     using Vec = typename T::dist_vector_type;
     using LocalVec = typename T::non_dist_vector_type;
     using MixedVec = typename T::mixed_dist_vector_type;
@@ -270,10 +264,7 @@ protected:
     template <typename ValueType, typename IndexType>
     gko::matrix_data<ValueType, IndexType> gen_dense_data(gko::dim<2> size)
     {
-        return {
-            size,
-            std::normal_distribution<gko::remove_complex<ValueType>>(0.0, 1.0),
-            rand_engine};
+        return {size, std::normal_distribution<>(0.0, 1.0), rand_engine};
     }
 
     template <typename DistVecType = Vec>
@@ -300,10 +291,7 @@ protected:
     {
         return gko::share(gko::initialize<VecType>(
             {gko::test::detail::get_rand_value<typename VecType::value_type>(
-                std::normal_distribution<
-                    gko::remove_complex<typename VecType::value_type>>(0.0,
-                                                                       1.0),
-                rand_engine)},
+                std::normal_distribution<>(0.0, 1.0), rand_engine)},
             exec));
     }
 
@@ -454,14 +442,18 @@ protected:
                        gen_out_vec<DistVecType>(part, solver, 2, 4));
         }
         {
+#ifndef GINKGO_FAST_TESTS
             SCOPED_TRACE("Multivector with 17 columns");
             guarded_fn(gen_in_vec<DistVecType>(part, solver, 17, 17),
                        gen_out_vec<DistVecType>(part, solver, 17, 17));
+#endif
         }
         {
+#ifndef GINKGO_FAST_TESTS
             SCOPED_TRACE("Strided multivector with 17 columns");
             guarded_fn(gen_in_vec<DistVecType>(part, solver, 17, 21),
                        gen_out_vec<DistVecType>(part, solver, 17, 21));
+#endif
         }
         if (!gko::is_complex<value_type>()) {
             // check application of real matrix to complex vector
@@ -534,7 +526,10 @@ protected:
 
 using SolverTypes =
     ::testing::Types<Cg, CgWithMg, Cgs, Fcg, Bicgstab, Ir, Gcr<10u>, Gcr<100u>,
-                     Gmres<10u>, Gmres<100u>>;
+                     Gmres<10u, gko::solver::gmres::ortho_method::mgs>,
+                     Gmres<10u, gko::solver::gmres::ortho_method::cgs>,
+                     Gmres<10u, gko::solver::gmres::ortho_method::cgs2>,
+                     Gmres<100u, gko::solver::gmres::ortho_method::mgs>>;
 
 TYPED_TEST_SUITE(Solver, SolverTypes, TypenameNameGenerator);
 

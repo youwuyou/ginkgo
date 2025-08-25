@@ -1,13 +1,11 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/matrix/batch_ell.hpp>
-
+#include "ginkgo/core/matrix/batch_ell.hpp"
 
 #include <algorithm>
 #include <type_traits>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/exception.hpp>
@@ -16,7 +14,6 @@
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/matrix/ell.hpp>
-
 
 #include "core/matrix/batch_ell_kernels.hpp"
 #include "core/matrix/csr_kernels.hpp"
@@ -284,6 +281,48 @@ void Ell<ValueType, IndexType>::move_to(
 {
     this->convert_to(result);
 }
+
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::convert_to(
+    Ell<next_precision<ValueType, 2>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->col_idxs_ = this->col_idxs_;
+    result->num_elems_per_row_ = this->num_elems_per_row_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::move_to(
+    Ell<next_precision<ValueType, 2>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::convert_to(
+    Ell<next_precision<ValueType, 3>, IndexType>* result) const
+{
+    result->values_ = this->values_;
+    result->col_idxs_ = this->col_idxs_;
+    result->num_elems_per_row_ = this->num_elems_per_row_;
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Ell<ValueType, IndexType>::move_to(
+    Ell<next_precision<ValueType, 3>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
 
 
 #define GKO_DECLARE_BATCH_ELL_MATRIX(ValueType) class Ell<ValueType, int32>

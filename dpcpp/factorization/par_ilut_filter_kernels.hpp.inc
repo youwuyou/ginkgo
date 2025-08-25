@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -29,7 +29,7 @@ void abstract_filter_impl(const IndexType* row_ptrs, IndexType num_rows,
     for (IndexType step = 0; step < num_steps; ++step) {
         auto idx = begin + lane + step * subgroup_size;
         auto keep = idx < end && pred(idx, begin, end);
-        auto mask = subwarp.ballot(keep);
+        auto mask = group::ballot(subwarp, keep);
         step_cb(row, idx, keep, popcnt(mask), popcnt(mask & lane_prefix_mask));
     }
     finish_cb(row, lane);
@@ -102,7 +102,7 @@ void threshold_filter_nnz(const IndexType* __restrict__ row_ptrs,
         row_ptrs, num_rows,
         [&](IndexType idx, IndexType row_begin, IndexType row_end) {
             auto diag_idx = lower ? row_end - 1 : row_begin;
-            return std::abs(vals[idx]) >= threshold || idx == diag_idx;
+            return gko::abs(vals[idx]) >= threshold || idx == diag_idx;
         },
         nnz, item_ct1);
 }
@@ -140,7 +140,7 @@ void threshold_filter(const IndexType* __restrict__ old_row_ptrs,
         old_row_ptrs, old_col_idxs, old_vals, num_rows,
         [&](IndexType idx, IndexType row_begin, IndexType row_end) {
             auto diag_idx = lower ? row_end - 1 : row_begin;
-            return std::abs(old_vals[idx]) >= threshold || idx == diag_idx;
+            return gko::abs(old_vals[idx]) >= threshold || idx == diag_idx;
         },
         new_row_ptrs, new_row_idxs, new_col_idxs, new_vals, item_ct1);
 }

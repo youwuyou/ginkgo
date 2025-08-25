@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -6,15 +6,14 @@
 #define GKO_HIP_BASE_TYPES_HIP_HPP_
 
 
-#include <ginkgo/core/base/types.hpp>
-
-
 #include <type_traits>
-
 
 #include <hip/hip_complex.h>
 #include <hip/hip_fp16.h>
-#include <hip/hip_runtime.h>
+
+#include <ginkgo/core/base/types.hpp>
+
+
 #if HIP_VERSION >= 50200000
 #include <hipblas/hipblas.h>
 #else
@@ -22,13 +21,14 @@
 #endif
 #include <thrust/complex.h>
 
-
+#include <ginkgo/core/base/bfloat16.hpp>
+#include <ginkgo/core/base/half.hpp>
 #include <ginkgo/core/base/matrix_data.hpp>
 
+#include "common/cuda_hip/base/bf16_alias.hpp"
+#include "common/cuda_hip/base/runtime.hpp"
 
 namespace gko {
-
-
 namespace kernels {
 namespace hip {
 namespace detail {
@@ -130,6 +130,24 @@ struct hiplibs_type_impl<std::complex<double>> {
     using type = hipDoubleComplex;
 };
 
+template <>
+struct hiplibs_type_impl<half> {
+    using type = __half;
+};
+
+template <>
+struct hiplibs_type_impl<std::complex<half>> {
+    using type = __half2;
+};
+
+template <>
+struct hiplibs_type_impl<bfloat16> {
+    using type = vendor_bf16;
+};
+
+// Hip vendor library does not have bfloat162, so complex<bfloat16> is not
+// supported in Hip library call.
+
 template <typename T>
 struct hiplibs_type_impl<thrust::complex<T>> {
     using type = typename hiplibs_type_impl<std::complex<T>>::type;
@@ -202,9 +220,19 @@ struct hip_type_impl<volatile T> {
     using type = volatile typename hip_type_impl<T>::type;
 };
 
+template <>
+struct hip_type_impl<gko::half> {
+    using type = __half;
+};
+
+template <>
+struct hip_type_impl<gko::bfloat16> {
+    using type = vendor_bf16;
+};
+
 template <typename T>
 struct hip_type_impl<std::complex<T>> {
-    using type = thrust::complex<T>;
+    using type = thrust::complex<typename hip_type_impl<T>::type>;
 };
 
 template <>
@@ -217,6 +245,14 @@ struct hip_type_impl<hipComplex> {
     using type = thrust::complex<float>;
 };
 
+template <>
+struct hip_type_impl<__half2> {
+    using type = thrust::complex<__half>;
+};
+
+// Hip vendor library does not have bfloat162, so complex<bfloat16> is not
+// supported in Hip library call.
+
 template <typename T>
 struct hip_struct_member_type_impl {
     using type = T;
@@ -224,7 +260,17 @@ struct hip_struct_member_type_impl {
 
 template <typename T>
 struct hip_struct_member_type_impl<std::complex<T>> {
-    using type = fake_complex<T>;
+    using type = fake_complex<typename hip_struct_member_type_impl<T>::type>;
+};
+
+template <>
+struct hip_struct_member_type_impl<gko::half> {
+    using type = __half;
+};
+
+template <>
+struct hip_struct_member_type_impl<gko::bfloat16> {
+    using type = vendor_bf16;
 };
 
 template <typename ValueType, typename IndexType>
@@ -241,9 +287,15 @@ constexpr hipblasDatatype_t hip_data_type_impl()
 }
 
 template <>
-constexpr hipblasDatatype_t hip_data_type_impl<float16>()
+constexpr hipblasDatatype_t hip_data_type_impl<half>()
 {
     return HIPBLAS_R_16F;
+}
+
+template <>
+constexpr hipblasDatatype_t hip_data_type_impl<bfloat16>()
+{
+    return HIPBLAS_R_16B;
 }
 
 template <>
@@ -428,6 +480,10 @@ GKO_INLINE GKO_ATTRIBUTES constexpr
 {
     return detail::fake_complex_unpack_impl<T>::unpack(v);
 }
+
+
+using deviceComplex = hipComplex;
+using deviceDoubleComplex = hipDoubleComplex;
 
 
 }  // namespace hip

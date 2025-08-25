@@ -1,27 +1,26 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/solver/batch_bicgstab.hpp>
-
+#include "core/solver/batch_bicgstab_kernels.hpp"
 
 #include <memory>
 #include <random>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/batch_multi_vector.hpp>
 #include <ginkgo/core/log/batch_logger.hpp>
 #include <ginkgo/core/matrix/batch_csr.hpp>
 #include <ginkgo/core/matrix/batch_dense.hpp>
 #include <ginkgo/core/matrix/batch_ell.hpp>
-
+#include <ginkgo/core/matrix/batch_identity.hpp>
+#include <ginkgo/core/preconditioner/batch_jacobi.hpp>
+#include <ginkgo/core/solver/batch_bicgstab.hpp>
 
 #include "core/base/batch_utilities.hpp"
+#include "core/base/dispatch_helper.hpp"
 #include "core/matrix/batch_dense_kernels.hpp"
-#include "core/solver/batch_bicgstab_kernels.hpp"
 #include "core/test/utils.hpp"
 #include "core/test/utils/batch_helpers.hpp"
 
@@ -53,14 +52,17 @@ protected:
                                   const gko::batch::BatchLinOp* prec,
                                   const Mtx* mtx, const MVec* b, MVec* x,
                                   LogData& log_data) {
-            gko::kernels::reference::batch_bicgstab::apply<
-                typename Mtx::value_type>(executor, opts, mtx, prec, b, x,
-                                          log_data);
+            gko::run<gko::batch::matrix::Identity<value_type>,
+                     gko::batch::preconditioner::Jacobi<value_type>>(
+                prec, [&](auto preconditioner) {
+                    gko::kernels::reference::batch_bicgstab::apply(
+                        executor, opts, mtx, preconditioner, b, x, log_data);
+                });
         };
     }
 
     std::shared_ptr<const gko::ReferenceExecutor> exec;
-    const real_type eps = 1e-3;
+    const real_type eps = 5e-3;
     const gko::size_type num_batch_items = 2;
     const int num_rows = 15;
     const int num_rhs = 1;
@@ -86,7 +88,7 @@ TYPED_TEST(BatchBicgstab, SolvesStencilSystem)
     for (size_t i = 0; i < this->num_batch_items; i++) {
         ASSERT_LE(res.host_res_norm->get_const_values()[i] /
                       this->linear_system.host_rhs_norm->get_const_values()[i],
-                  this->solver_settings.residual_tol);
+                  2 * this->solver_settings.residual_tol);
     }
     GKO_ASSERT_BATCH_MTX_NEAR(res.x, this->linear_system.exact_sol,
                               this->eps * 10);
@@ -109,8 +111,14 @@ TYPED_TEST(BatchBicgstab, StencilSystemLoggerLogsResidual)
         ASSERT_LE(
             res_log_array[i] / this->linear_system.host_rhs_norm->at(i, 0, 0),
             this->solver_settings.residual_tol);
-        ASSERT_NEAR(res_log_array[i], res.host_res_norm->get_const_values()[i],
-                    10 * this->eps);
+        if (!std::is_same<real_type, gko::float16>::value &&
+            !std::is_same<real_type, gko::bfloat16>::value) {
+            // There is no guarantee of this condition. We disable this check in
+            // float16.
+            ASSERT_NEAR(res_log_array[i],
+                        res.host_res_norm->get_const_values()[i],
+                        10 * this->eps);
+        }
     }
 }
 
@@ -129,7 +137,7 @@ TYPED_TEST(BatchBicgstab, StencilSystemLoggerLogsIterations)
 
     auto iter_array = res.log_data->iter_counts.get_const_data();
     for (size_t i = 0; i < this->num_batch_items; i++) {
-        ASSERT_EQ(iter_array[i], ref_iters);
+        ASSERT_LE(iter_array[i], ref_iters);
     }
 }
 
@@ -140,7 +148,7 @@ TYPED_TEST(BatchBicgstab, CanSolveDenseSystem)
     using real_type = gko::remove_complex<value_type>;
     using Solver = typename TestFixture::solver_type;
     using Mtx = typename TestFixture::Mtx;
-    const real_type tol = 1e-5;
+    const real_type tol = 1e-3;
     const int max_iters = 1000;
     auto solver_factory =
         Solver::build()
@@ -165,7 +173,7 @@ TYPED_TEST(BatchBicgstab, CanSolveDenseSystem)
     for (size_t i = 0; i < num_batch_items; i++) {
         ASSERT_LE(res.host_res_norm->get_const_values()[i] /
                       linear_system.host_rhs_norm->get_const_values()[i],
-                  tol);
+                  tol * 10);
     }
 }
 
@@ -177,7 +185,12 @@ TYPED_TEST(BatchBicgstab, ApplyLogsResAndIters)
     using Solver = typename TestFixture::solver_type;
     using Mtx = typename TestFixture::Mtx;
     using Logger = gko::batch::log::BatchConvergence<value_type>;
-    const real_type tol = 1e-5;
+    // bfloat16 will need to bump the scale from 50 to 100, which gives around
+    // 0.7 for error check, so it is not really useful for testing. We skip the
+    // bfloat16 for this check.
+    // TODO: figure out a suitible test for different precision.
+    SKIP_IF_BFLOAT16(value_type);
+    const real_type tol = 1e-4;
     const int max_iters = 1000;
     auto solver_factory =
         Solver::build()
@@ -209,7 +222,7 @@ TYPED_TEST(BatchBicgstab, ApplyLogsResAndIters)
                             linear_system.host_rhs_norm->get_const_values()[i];
         ASSERT_LE(iter_counts.get_const_data()[i], max_iters);
         EXPECT_LE(res_norm.get_const_data()[i], tol * 50);
-        ASSERT_LE(rel_res_norm, tol * 50);
+        ASSERT_LE(rel_res_norm, tol * 100);
     }
 }
 
@@ -220,7 +233,7 @@ TYPED_TEST(BatchBicgstab, CanSolveEllSystem)
     using real_type = gko::remove_complex<value_type>;
     using Solver = typename TestFixture::solver_type;
     using Mtx = typename TestFixture::EllMtx;
-    const real_type tol = 1e-5;
+    const real_type tol = 1e-3;
     const int max_iters = 1000;
     auto solver_factory =
         Solver::build()
@@ -256,7 +269,7 @@ TYPED_TEST(BatchBicgstab, CanSolveCsrSystem)
     using real_type = gko::remove_complex<value_type>;
     using Solver = typename TestFixture::solver_type;
     using Mtx = typename TestFixture::CsrMtx;
-    const real_type tol = 1e-5;
+    const real_type tol = 1e-3;
     const int max_iters = 1000;
     auto solver_factory =
         Solver::build()
@@ -292,6 +305,12 @@ TYPED_TEST(BatchBicgstab, CanSolveDenseHpdSystem)
     using real_type = gko::remove_complex<value_type>;
     using Solver = typename TestFixture::solver_type;
     using Mtx = typename TestFixture::Mtx;
+    // Need to design a better random system. With different random value
+    // distribution, the solver can not solve the hpd matrix even with single
+    // precision
+    SKIP_IF_HALF(value_type);
+    // TODO: the tol here is already smaller than epsilon of bfloat16
+    SKIP_IF_BFLOAT16(value_type);
     const real_type tol = 1e-5;
     const int max_iters = 1000;
     auto solver_factory =

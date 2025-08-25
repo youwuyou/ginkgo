@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include <typeinfo>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/config/config.hpp>
@@ -21,7 +19,6 @@
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/sparsity_csr.hpp>
 #include <ginkgo/core/stop/iteration.hpp>
-
 
 #include "core/config/config_helper.hpp"
 #include "core/config/registry_accessor.hpp"
@@ -78,6 +75,9 @@ struct Ic : FactorizationConfigTest<gko::factorization::Ic<float, int>,
         param.with_skip_sorting(true);
         config_map["both_factors"] = pnode{false};
         param.with_both_factors(false);
+        config_map["algorithm"] = pnode{"syncfree"};
+        param.with_algorithm(
+            gko::factorization::incomplete_algorithm::syncfree);
     }
 
     template <typename AnswerType>
@@ -89,6 +89,7 @@ struct Ic : FactorizationConfigTest<gko::factorization::Ic<float, int>,
         check_strategy(res_param.l_strategy, ans_param.l_strategy);
         ASSERT_EQ(res_param.skip_sorting, ans_param.skip_sorting);
         ASSERT_EQ(res_param.both_factors, ans_param.both_factors);
+        ASSERT_EQ(res_param.algorithm, ans_param.algorithm);
     }
 };
 
@@ -114,6 +115,9 @@ struct Ilu : FactorizationConfigTest<gko::factorization::Ilu<float, int>,
                 typename gko::matrix::Csr<float, int>::sparselib>());
         config_map["skip_sorting"] = pnode{true};
         param.with_skip_sorting(true);
+        config_map["algorithm"] = pnode{"syncfree"};
+        param.with_algorithm(
+            gko::factorization::incomplete_algorithm::syncfree);
     }
 
     template <typename AnswerType>
@@ -125,6 +129,7 @@ struct Ilu : FactorizationConfigTest<gko::factorization::Ilu<float, int>,
         check_strategy(res_param.l_strategy, ans_param.l_strategy);
         check_strategy(res_param.u_strategy, ans_param.u_strategy);
         ASSERT_EQ(res_param.skip_sorting, ans_param.skip_sorting);
+        ASSERT_EQ(res_param.algorithm, ans_param.algorithm);
     }
 };
 
@@ -412,6 +417,18 @@ TYPED_TEST(Factorization, CreateDefault)
     auto ans = Config::default_type::build().on(this->exec);
 
     Config::validate(res.get(), ans.get());
+}
+
+
+TYPED_TEST(Factorization, ThrowWhenKeyIsNotAllowed)
+{
+    using Config = typename TestFixture::Config;
+    auto pnode_map = Config::setup_base();
+    pnode_map["invalid_key"] = pnode{""};
+    auto config = pnode(pnode_map);
+
+    ASSERT_THROW(parse(config, this->reg, this->td).on(this->exec),
+                 gko::InvalidStateError);
 }
 
 

@@ -1,18 +1,18 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/solver/multigrid.hpp>
-
+#include "ginkgo/core/solver/multigrid.hpp"
 
 #include <complex>
-
+#include <string>
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/base/lin_op.hpp>
 #include <ginkgo/core/base/math.hpp>
+#include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/base/utils_helper.hpp>
 #include <ginkgo/core/distributed/matrix.hpp>
@@ -26,7 +26,6 @@
 #include <ginkgo/core/solver/ir.hpp>
 #include <ginkgo/core/stop/iteration.hpp>
 #include <ginkgo/core/stop/residual_norm.hpp>
-
 
 #include "core/base/dispatch_helper.hpp"
 #include "core/components/fill_array_kernels.hpp"
@@ -203,7 +202,8 @@ namespace detail {
  *
  * @note it should only be used internally
  */
-struct MultigridState {
+class MultigridState {
+public:
     MultigridState() : nrhs{static_cast<size_type>(-1)} {}
 
     /**
@@ -320,6 +320,12 @@ void MultigridState::generate(const LinOp* system_matrix_in,
         auto mg_level = mg_level_list.at(i);
 
         run<gko::multigrid::EnableMultigridLevel, float, double,
+#if GINKGO_ENABLE_HALF
+            float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+            bfloat16, std::complex<bfloat16>,
+#endif
             std::complex<float>, std::complex<double>>(
             mg_level,
             [&, this](auto mg_level, auto i, auto cycle, auto current_nrows,
@@ -352,6 +358,7 @@ void MultigridState::generate(const LinOp* system_matrix_in,
                     this->allocate_memory<VectorType>(
                         i, cycle, current_comm, next_comm, current_nrows,
                         next_nrows, current_local_nrows, next_local_nrows);
+
                 } else
 #endif
                 {
@@ -458,6 +465,12 @@ void MultigridState::run_mg_cycle(multigrid::cycle cycle, size_type level,
     }
     auto mg_level = multigrid->get_mg_level_list().at(level);
     run<gko::multigrid::EnableMultigridLevel, float, double,
+#if GINKGO_ENABLE_HALF
+        float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+        bfloat16, std::complex<bfloat16>,
+#endif
         std::complex<float>, std::complex<double>>(
         mg_level, [&, this](auto mg_level) {
 #if GINKGO_BUILD_MPI
@@ -489,7 +502,7 @@ void MultigridState::run_cycle(multigrid::cycle cycle, size_type level,
 
     auto r = r_list.at(level);
     auto g = g_list.at(level);
-    auto e = as<VectorType>(e_list.at(level));
+    auto e = e_list.at(level);
     // get mg_level
     auto mg_level = multigrid->get_mg_level_list().at(level);
     // get the pre_smoother
@@ -540,7 +553,7 @@ void MultigridState::run_cycle(multigrid::cycle cycle, size_type level,
     // next level
     if (level + 1 == total_level) {
         // the coarsest solver use the last level valuetype
-        e->fill(zero<value_type>());
+        as<VectorType>(e)->fill(zero<value_type>());
     }
     auto next_level_matrix =
         (level + 1 < total_level)
@@ -589,6 +602,7 @@ void MultigridState::run_cycle(multigrid::cycle cycle, size_type level,
     }
 }
 
+
 }  // namespace detail
 }  // namespace multigrid
 
@@ -598,36 +612,36 @@ typename Multigrid::parameters_type Multigrid::parse(
     const config::type_descriptor& td_for_child)
 {
     auto params = Multigrid::build();
-
-    if (auto& obj = config.get("criteria")) {
+    config::config_check_decorator config_check(config);
+    if (auto& obj = config_check.get("criteria")) {
         params.with_criteria(
             config::parse_or_get_factory_vector<const stop::CriterionFactory>(
                 obj, context, td_for_child));
     }
-    if (auto& obj = config.get("mg_level")) {
+    if (auto& obj = config_check.get("mg_level")) {
         params.with_mg_level(
             config::parse_or_get_factory_vector<const gko::LinOpFactory>(
                 obj, context, td_for_child));
     }
-    if (auto& obj = config.get("pre_smoother")) {
+    if (auto& obj = config_check.get("pre_smoother")) {
         params.with_pre_smoother(
             config::parse_or_get_factory_vector<const LinOpFactory>(
                 obj, context, td_for_child));
     }
-    if (auto& obj = config.get("post_smoother")) {
+    if (auto& obj = config_check.get("post_smoother")) {
         params.with_post_smoother(
             config::parse_or_get_factory_vector<const LinOpFactory>(
                 obj, context, td_for_child));
     }
-    if (auto& obj = config.get("mid_smoother")) {
+    if (auto& obj = config_check.get("mid_smoother")) {
         params.with_mid_smoother(
             config::parse_or_get_factory_vector<const LinOpFactory>(
                 obj, context, td_for_child));
     }
-    if (auto& obj = config.get("post_uses_pre")) {
+    if (auto& obj = config_check.get("post_uses_pre")) {
         params.with_post_uses_pre(gko::config::get_value<bool>(obj));
     }
-    if (auto& obj = config.get("mid_case")) {
+    if (auto& obj = config_check.get("mid_case")) {
         auto str = obj.get_string();
         if (str == "both") {
             params.with_mid_case(multigrid::mid_smooth_type::both);
@@ -641,18 +655,18 @@ typename Multigrid::parameters_type Multigrid::parse(
             GKO_INVALID_CONFIG_VALUE("mid_smooth_type", str);
         }
     }
-    if (auto& obj = config.get("max_levels")) {
+    if (auto& obj = config_check.get("max_levels")) {
         params.with_max_levels(gko::config::get_value<size_type>(obj));
     }
-    if (auto& obj = config.get("min_coarse_rows")) {
+    if (auto& obj = config_check.get("min_coarse_rows")) {
         params.with_min_coarse_rows(gko::config::get_value<size_type>(obj));
     }
-    if (auto& obj = config.get("coarsest_solver")) {
+    if (auto& obj = config_check.get("coarsest_solver")) {
         params.with_coarsest_solver(
             config::parse_or_get_factory_vector<const LinOpFactory>(
                 obj, context, td_for_child));
     }
-    if (auto& obj = config.get("cycle")) {
+    if (auto& obj = config_check.get("cycle")) {
         auto str = obj.get_string();
         if (str == "v") {
             params.with_cycle(multigrid::cycle::v);
@@ -664,23 +678,24 @@ typename Multigrid::parameters_type Multigrid::parse(
             GKO_INVALID_CONFIG_VALUE("cycle", str);
         }
     }
-    if (auto& obj = config.get("kcycle_base")) {
+    if (auto& obj = config_check.get("kcycle_base")) {
         params.with_kcycle_base(gko::config::get_value<size_type>(obj));
     }
-    if (auto& obj = config.get("kcycle_rel_tol")) {
+    if (auto& obj = config_check.get("kcycle_rel_tol")) {
         params.with_kcycle_rel_tol(gko::config::get_value<double>(obj));
     }
-    if (auto& obj = config.get("smoother_relax")) {
+    if (auto& obj = config_check.get("smoother_relax")) {
         params.with_smoother_relax(
-            gko::config::get_value<std::complex<double>>(obj));
+            config::get_value<std::complex<double>>(obj));
     }
-    if (auto& obj = config.get("smoother_iters")) {
-        params.with_smoother_iters(gko::config::get_value<size_type>(obj));
+    if (auto& obj = config_check.get("smoother_iters")) {
+        params.with_smoother_iters(config::get_value<size_type>(obj));
     }
-    if (auto& obj = config.get("default_initial_guess")) {
+    if (auto& obj = config_check.get("default_initial_guess")) {
         params.with_default_initial_guess(
-            gko::config::get_value<solver::initial_guess_mode>(obj));
+            config::get_value<solver::initial_guess_mode>(obj));
     }
+
     return params;
 }
 
@@ -707,6 +722,12 @@ void Multigrid::generate()
         }
 
         run<gko::multigrid::EnableMultigridLevel, float, double,
+#if GINKGO_ENABLE_HALF
+            float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+            bfloat16, std::complex<bfloat16>,
+#endif
             std::complex<float>, std::complex<double>>(
             mg_level,
             [this](auto mg_level, auto index, auto matrix) {
@@ -745,6 +766,12 @@ void Multigrid::generate()
 
     // generate coarsest solver
     run<gko::multigrid::EnableMultigridLevel, float, double,
+#if GINKGO_ENABLE_HALF
+        float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+        bfloat16, std::complex<bfloat16>,
+#endif
         std::complex<float>, std::complex<double>>(
         last_mg_level,
         [this](auto mg_level, auto level, auto matrix) {
@@ -754,7 +781,6 @@ void Multigrid::generate()
             // default coarse grid solver, direct LU
             // TODO: maybe remove fixed index type
             auto gen_default_solver = [&]() -> std::unique_ptr<LinOp> {
-        // TODO: unify when dpcpp supports direct solver
 #if GINKGO_BUILD_MPI
                 if (gko::detail::is_distributed(matrix.get())) {
                     using absolute_value_type = remove_complex<value_type>;
@@ -790,6 +816,7 @@ void Multigrid::generate()
                     });
                 }
 #endif
+                // TODO: unify when dpcpp supports direct solver
                 if (dynamic_cast<const DpcppExecutor*>(exec.get())) {
                     using absolute_value_type = remove_complex<value_type>;
                     return solver::Gmres<value_type>::build()
@@ -862,6 +889,12 @@ void Multigrid::apply_with_initial_guess_impl(const LinOp* b, LinOp* x,
     };
     auto first_mg_level = this->get_mg_level_list().front();
     run<gko::multigrid::EnableMultigridLevel, float, double,
+#if GINKGO_ENABLE_HALF
+        float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+        bfloat16, std::complex<bfloat16>,
+#endif
         std::complex<float>, std::complex<double>>(first_mg_level, lambda, b,
                                                    x);
 }
@@ -901,6 +934,12 @@ void Multigrid::apply_with_initial_guess_impl(const LinOp* alpha,
     };
     auto first_mg_level = this->get_mg_level_list().front();
     run<gko::multigrid::EnableMultigridLevel, float, double,
+#if GINKGO_ENABLE_HALF
+        float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+        bfloat16, std::complex<bfloat16>,
+#endif
         std::complex<float>, std::complex<double>>(first_mg_level, lambda,
                                                    alpha, b, beta, x);
 }
@@ -966,6 +1005,12 @@ void Multigrid::apply_dense_impl(const VectorType* b, VectorType* x,
     auto first_mg_level = this->get_mg_level_list().front();
 
     run<gko::multigrid::EnableMultigridLevel, float, double,
+#if GINKGO_ENABLE_HALF
+        float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+        bfloat16, std::complex<bfloat16>,
+#endif
         std::complex<float>, std::complex<double>>(first_mg_level, lambda, b,
                                                    x);
 }

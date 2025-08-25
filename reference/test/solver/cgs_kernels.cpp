@@ -1,23 +1,21 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/solver/cgs.hpp>
-
+#include "core/solver/cgs_kernels.hpp"
 
 #include <gtest/gtest.h>
 
-
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/executor.hpp>
+#include <ginkgo/core/log/solver_progress.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
+#include <ginkgo/core/solver/cgs.hpp>
 #include <ginkgo/core/stop/combined.hpp>
 #include <ginkgo/core/stop/iteration.hpp>
 #include <ginkgo/core/stop/residual_norm.hpp>
 #include <ginkgo/core/stop/time.hpp>
 
-
-#include "core/solver/cgs_kernels.hpp"
 #include "core/test/utils.hpp"
 
 
@@ -287,6 +285,12 @@ TYPED_TEST(Cgs, SolvesDenseSystem)
     auto solver = this->cgs_factory->generate(this->mtx);
     auto b = gko::initialize<Mtx>({-1.0, 3.0, 1.0}, this->exec);
     auto x = gko::initialize<Mtx>({0.0, 0.0, 0.0}, this->exec);
+    if (std::is_same_v<gko::remove_complex<value_type>, gko::bfloat16>) {
+        // choose the close initial guess for bfloat16. the original initial
+        // guess give quite different gamma after 2 iteration due to accumulated
+        // rounding error.
+        x = gko::initialize<Mtx>({-3.2, -0.8, 3.2}, this->exec);
+    }
 
     solver->apply(b, x);
 
@@ -296,16 +300,23 @@ TYPED_TEST(Cgs, SolvesDenseSystem)
 
 TYPED_TEST(Cgs, SolvesDenseSystemMixed)
 {
-    using value_type = gko::next_precision<typename TestFixture::value_type>;
-    using Mtx = gko::matrix::Dense<value_type>;
+    using value_type = typename TestFixture::value_type;
+    using next_type = gko::next_precision<value_type>;
+    using Mtx = gko::matrix::Dense<next_type>;
     auto solver = this->cgs_factory->generate(this->mtx);
     auto b = gko::initialize<Mtx>({-1.0, 3.0, 1.0}, this->exec);
     auto x = gko::initialize<Mtx>({0.0, 0.0, 0.0}, this->exec);
+    if (std::is_same_v<gko::remove_complex<value_type>, gko::bfloat16>) {
+        // choose the close initial guess for bfloat16. the original initial
+        // guess give quite different gamma after 2 iteration due to accumulated
+        // rounding error.
+        x = gko::initialize<Mtx>({-3.2, -0.8, 3.2}, this->exec);
+    }
 
     solver->apply(b, x);
 
     GKO_ASSERT_MTX_NEAR(x, l({-4.0, -1.0, 4.0}),
-                        (r_mixed<value_type, TypeParam>()));
+                        (r_mixed<next_type, value_type>()));
 }
 
 
@@ -363,6 +374,13 @@ TYPED_TEST(Cgs, SolvesMultipleDenseSystem)
         {I<T>{-1.0, -5.0}, I<T>{3.0, 1.0}, I<T>{1.0, -2.0}}, this->exec);
     auto x = gko::initialize<Mtx>(
         {I<T>{0.0, 0.0}, I<T>{0.0, 0.0}, I<T>{0.0, 0.0}}, this->exec);
+    if (std::is_same_v<gko::remove_complex<value_type>, gko::bfloat16>) {
+        // choose the close initial guess for bfloat16. the original initial
+        // guess give quite different gamma after 2 iteration due to accumulated
+        // rounding error.
+        x = gko::initialize<Mtx>(
+            {I<T>{-3.2, 0.8}, I<T>{-0.8, 1.6}, I<T>{3.2, -0.8}}, this->exec);
+    }
 
     solver->apply(b, x);
 
@@ -416,13 +434,13 @@ TYPED_TEST(Cgs, SolvesDenseSystemUsingAdvancedApplyComplex)
         {value_type{-1.0, 2.0}, value_type{3.0, -6.0}, value_type{1.0, -2.0}},
         this->exec);
     auto x = gko::initialize<Mtx>(
-        {value_type{0.5, -1.0}, value_type{1.0, -2.0}, value_type{2.0, -4.0}},
+        {value_type{-2.0, 4.0}, value_type{-0.5, 1.0}, value_type{2.0, -4.0}},
         this->exec);
 
     solver->apply(alpha, b, beta, x);
 
     GKO_ASSERT_MTX_NEAR(x,
-                        l({value_type{-8.5, 17.0}, value_type{-3.0, 6.0},
+                        l({value_type{-6.0, 12.0}, value_type{-1.5, 3.0},
                            value_type{6.0, -12.0}}),
                         r<value_type>::value * 1e3);
 }
@@ -441,13 +459,14 @@ TYPED_TEST(Cgs, SolvesDenseSystemUsingAdvancedApplyMixedComplex)
         {value_type{-1.0, 2.0}, value_type{3.0, -6.0}, value_type{1.0, -2.0}},
         this->exec);
     auto x = gko::initialize<Mtx>(
-        {value_type{0.5, -1.0}, value_type{1.0, -2.0}, value_type{2.0, -4.0}},
+        {value_type{-2.0, 4.0}, value_type{-0.5, 1.0}, value_type{2.0, -4.0}},
         this->exec);
+
 
     solver->apply(alpha, b, beta, x);
 
     GKO_ASSERT_MTX_NEAR(x,
-                        l({value_type{-8.5, 17.0}, value_type{-3.0, 6.0},
+                        l({value_type{-6.0, 12.0}, value_type{-1.5, 3.0},
                            value_type{6.0, -12.0}}),
                         (r_mixed<value_type, TypeParam>()) * 1e3);
 }
@@ -466,11 +485,23 @@ TYPED_TEST(Cgs, SolvesMultipleDenseSystemsUsingAdvancedApply)
         {I<T>{-1.0, -5.0}, I<T>{3.0, 1.0}, I<T>{1.0, -2.0}}, this->exec);
     auto x = gko::initialize<Mtx>(
         {I<T>{0.5, 1.0}, I<T>{1.0, 2.0}, I<T>{2.0, 3.0}}, this->exec);
+    if (std::is_same_v<gko::remove_complex<value_type>, gko::bfloat16>) {
+        // choose the close initial guess for bfloat16. the original initial
+        // guess give quite different gamma after 2 iteration due to accumulated
+        // rounding error.
+        x = gko::initialize<Mtx>(
+            {I<T>{-3.2, 0.8}, I<T>{-0.8, 1.6}, I<T>{3.2, -0.8}}, this->exec);
+    }
 
     solver->apply(alpha, b, beta, x);
 
-    GKO_ASSERT_MTX_NEAR(x, l({{-8.5, 1.0}, {-3.0, 2.0}, {6.0, -5.0}}),
-                        half_tol);
+    if (std::is_same_v<gko::remove_complex<value_type>, gko::bfloat16>) {
+        GKO_ASSERT_MTX_NEAR(x, l({{-4.8, 1.2}, {-1.2, 2.4}, {4.8, -1.2}}),
+                            half_tol);
+    } else {
+        GKO_ASSERT_MTX_NEAR(x, l({{-8.5, 1.0}, {-3.0, 2.0}, {6.0, -5.0}}),
+                            half_tol);
+    }
 }
 
 
@@ -478,6 +509,8 @@ TYPED_TEST(Cgs, SolvesBigDenseSystem1)
 {
     using Mtx = typename TestFixture::Mtx;
     using value_type = typename TestFixture::value_type;
+    // squared_norm of residual(=b) exceeds the range of half precision.
+    SKIP_IF_HALF(value_type);
     auto solver = this->cgs_factory_big->generate(this->mtx_big);
     auto b = gko::initialize<Mtx>(
         {764.0, -4032.0, -11855.0, 7111.0, -12765.0, -4589}, this->exec);
@@ -494,6 +527,8 @@ TYPED_TEST(Cgs, SolvesBigDenseSystemWithImplicitResNormCrit)
 {
     using Mtx = typename TestFixture::Mtx;
     using value_type = typename TestFixture::value_type;
+    // squared_norm of residual(=b) exceeds the range of half precision.
+    SKIP_IF_HALF(value_type);
     auto solver = this->cgs_factory_big2->generate(this->mtx_big);
     auto b = gko::initialize<Mtx>(
         {17356.0, 5466.0, 748.0, -456.0, 3434.0, -7020.0}, this->exec);
@@ -510,6 +545,8 @@ TYPED_TEST(Cgs, SolvesBigDenseSystem2)
 {
     using Mtx = typename TestFixture::Mtx;
     using value_type = typename TestFixture::value_type;
+    // squared_norm of residual(=b) exceeds the range of half precision.
+    SKIP_IF_HALF(value_type);
     auto solver = this->cgs_factory_big->generate(this->mtx_big);
     auto b = gko::initialize<Mtx>(
         {17356.0, 5466.0, 748.0, -456.0, 3434.0, -7020.0}, this->exec);
@@ -526,6 +563,8 @@ TYPED_TEST(Cgs, SolvesMultipleDenseSystems)
 {
     using Mtx = typename TestFixture::Mtx;
     using value_type = typename TestFixture::value_type;
+    // squared_norm of residual(=b) exceeds the range of half precision.
+    SKIP_IF_HALF(value_type);
     auto solver = this->cgs_factory_big->generate(this->mtx_big);
     auto b1 = gko::initialize<Mtx>(
         {764.0, -4032.0, -11855.0, 7111.0, -12765.0, -4589}, this->exec);
@@ -592,6 +631,8 @@ TYPED_TEST(Cgs, SolvesTransposedBigDenseSystem)
 {
     using Mtx = typename TestFixture::Mtx;
     using value_type = typename TestFixture::value_type;
+    // squared_norm of residual(=b) exceeds the range of half precision.
+    SKIP_IF_HALF(value_type);
     auto solver = this->cgs_factory_big->generate(this->mtx_big->transpose());
     auto b = gko::initialize<Mtx>(
         {764.0, -4032.0, -11855.0, 7111.0, -12765.0, -4589}, this->exec);
@@ -608,6 +649,8 @@ TYPED_TEST(Cgs, SolvesConjTransposedBigDenseSystem)
 {
     using Mtx = typename TestFixture::Mtx;
     using value_type = typename TestFixture::value_type;
+    // squared_norm of residual(=b) exceeds the range of half precision.
+    SKIP_IF_HALF(value_type);
     auto solver =
         this->cgs_factory_big->generate(this->mtx_big->conj_transpose());
     auto b = gko::initialize<Mtx>(

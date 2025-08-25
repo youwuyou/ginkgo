@@ -1,25 +1,21 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/distributed/partition_kernels.hpp"
 
-
 #include <algorithm>
 #include <memory>
 #include <vector>
 
-
 #include <gtest/gtest-typed-test.h>
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/distributed/partition.hpp>
 
-
 #include "core/test/utils.hpp"
-#include "test/utils/executor.hpp"
+#include "test/utils/common_fixture.hpp"
 
 
 using comm_index_type = gko::experimental::distributed::comm_index_type;
@@ -73,6 +69,9 @@ protected:
             gko::make_array_view(
                 this->exec, dpart->get_num_parts(),
                 const_cast<local_index_type*>(dpart->get_part_sizes())));
+
+        GKO_ASSERT_SEGMENTED_ARRAY_EQ(part->get_ranges_by_part(),
+                                      dpart->get_ranges_by_part());
     }
 
     std::default_random_engine rand_engine;

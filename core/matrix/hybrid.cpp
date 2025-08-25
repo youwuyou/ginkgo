@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/matrix/hybrid.hpp>
-
+#include "ginkgo/core/matrix/hybrid.hpp"
 
 #include <algorithm>
-
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -15,7 +13,6 @@
 #include <ginkgo/core/base/temporary_clone.hpp>
 #include <ginkgo/core/base/utils.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/base/array_access.hpp"
 #include "core/base/device_matrix_data_kernels.hpp"
@@ -223,6 +220,52 @@ void Hybrid<ValueType, IndexType>::move_to(
 {
     this->convert_to(result);
 }
+
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Hybrid<ValueType, IndexType>::convert_to(
+    Hybrid<next_precision<ValueType, 2>, IndexType>* result) const
+{
+    this->ell_->convert_to(result->ell_.get());
+    this->coo_->convert_to(result->coo_.get());
+    // TODO set strategy correctly
+    // There is no way to correctly clone the strategy like in
+    // Csr::convert_to
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Hybrid<ValueType, IndexType>::move_to(
+    Hybrid<next_precision<ValueType, 2>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
+
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+template <typename ValueType, typename IndexType>
+void Hybrid<ValueType, IndexType>::convert_to(
+    Hybrid<next_precision<ValueType, 3>, IndexType>* result) const
+{
+    this->ell_->convert_to(result->ell_.get());
+    this->coo_->convert_to(result->coo_.get());
+    // TODO set strategy correctly
+    // There is no way to correctly clone the strategy like in
+    // Csr::convert_to
+    result->set_size(this->get_size());
+}
+
+
+template <typename ValueType, typename IndexType>
+void Hybrid<ValueType, IndexType>::move_to(
+    Hybrid<next_precision<ValueType, 3>, IndexType>* result)
+{
+    this->convert_to(result);
+}
+#endif
 
 
 template <typename ValueType, typename IndexType>

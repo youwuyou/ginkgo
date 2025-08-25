@@ -1,20 +1,19 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/factorization/factorization_kernels.hpp"
 
-
 #include <algorithm>
 #include <memory>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 
-
+#include "core/base/allocator.hpp"
 #include "core/components/prefix_sum_kernels.hpp"
 #include "core/matrix/csr_builder.hpp"
+#include "omp/factorization/factorization_helpers.hpp"
 
 
 namespace gko {
@@ -227,49 +226,12 @@ void initialize_l_u(std::shared_ptr<const OmpExecutor> exec,
                     matrix::Csr<ValueType, IndexType>* csr_l,
                     matrix::Csr<ValueType, IndexType>* csr_u)
 {
-    const auto row_ptrs = system_matrix->get_const_row_ptrs();
-    const auto col_idxs = system_matrix->get_const_col_idxs();
-    const auto vals = system_matrix->get_const_values();
-
-    const auto row_ptrs_l = csr_l->get_const_row_ptrs();
-    auto col_idxs_l = csr_l->get_col_idxs();
-    auto vals_l = csr_l->get_values();
-
-    const auto row_ptrs_u = csr_u->get_const_row_ptrs();
-    auto col_idxs_u = csr_u->get_col_idxs();
-    auto vals_u = csr_u->get_values();
-
-#pragma omp parallel for
-    for (size_type row = 0; row < system_matrix->get_size()[0]; ++row) {
-        size_type current_index_l = row_ptrs_l[row];
-        size_type current_index_u =
-            row_ptrs_u[row] + 1;  // we treat the diagonal separately
-        // if there is no diagonal value, set it to 1 by default
-        auto diag_val = one<ValueType>();
-        for (size_type el = row_ptrs[row]; el < row_ptrs[row + 1]; ++el) {
-            const auto col = col_idxs[el];
-            const auto val = vals[el];
-            if (col < row) {
-                col_idxs_l[current_index_l] = col;
-                vals_l[current_index_l] = val;
-                ++current_index_l;
-            } else if (col == row) {
-                // save value for later
-                diag_val = val;
-            } else {  // col > row
-                col_idxs_u[current_index_u] = col;
-                vals_u[current_index_u] = val;
-                ++current_index_u;
-            }
-        }
-        // store diagonal entries
-        size_type l_diag_idx = row_ptrs_l[row + 1] - 1;
-        size_type u_diag_idx = row_ptrs_u[row];
-        col_idxs_l[l_diag_idx] = row;
-        col_idxs_u[u_diag_idx] = row;
-        vals_l[l_diag_idx] = one<ValueType>();
-        vals_u[u_diag_idx] = diag_val;
-    }
+    helpers::initialize_l_u(
+        system_matrix, csr_l, csr_u,
+        helpers::triangular_mtx_closure([](auto) { return one<ValueType>(); },
+                                        helpers::identity{}),
+        helpers::triangular_mtx_closure(helpers::identity{},
+                                        helpers::identity{}));
 }
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
@@ -312,47 +274,86 @@ void initialize_l(std::shared_ptr<const OmpExecutor> exec,
                   const matrix::Csr<ValueType, IndexType>* system_matrix,
                   matrix::Csr<ValueType, IndexType>* csr_l, bool diag_sqrt)
 {
-    const auto row_ptrs = system_matrix->get_const_row_ptrs();
-    const auto col_idxs = system_matrix->get_const_col_idxs();
-    const auto vals = system_matrix->get_const_values();
-
-    const auto row_ptrs_l = csr_l->get_const_row_ptrs();
-    auto col_idxs_l = csr_l->get_col_idxs();
-    auto vals_l = csr_l->get_values();
-
-#pragma omp parallel for
-    for (size_type row = 0; row < system_matrix->get_size()[0]; ++row) {
-        size_type current_index_l = row_ptrs_l[row];
-        // if there is no diagonal value, set it to 1 by default
-        auto diag_val = one<ValueType>();
-        for (size_type el = row_ptrs[row]; el < row_ptrs[row + 1]; ++el) {
-            const auto col = col_idxs[el];
-            const auto val = vals[el];
-            if (col < row) {
-                col_idxs_l[current_index_l] = col;
-                vals_l[current_index_l] = val;
-                ++current_index_l;
-            } else if (col == row) {
-                // save value for later
-                diag_val = val;
-            }
-        }
-        // store diagonal entries
-        size_type l_diag_idx = row_ptrs_l[row + 1] - 1;
-        col_idxs_l[l_diag_idx] = row;
-        // compute square root with sentinel
-        if (diag_sqrt) {
-            diag_val = sqrt(diag_val);
-            if (!is_finite(diag_val)) {
-                diag_val = one<ValueType>();
-            }
-        }
-        vals_l[l_diag_idx] = diag_val;
-    }
+    helpers::initialize_l(system_matrix, csr_l,
+                          helpers::triangular_mtx_closure(
+                              [diag_sqrt](auto val) {
+                                  if (diag_sqrt) {
+                                      val = sqrt(val);
+                                      if (!is_finite(val)) {
+                                          val = one<ValueType>();
+                                      }
+                                  }
+                                  return val;
+                              },
+                              helpers::identity{}));
 }
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_FACTORIZATION_INITIALIZE_L_KERNEL);
+
+
+template <typename IndexType>
+bool symbolic_validate_impl(std::shared_ptr<const DefaultExecutor> exec,
+                            const IndexType* row_ptrs, const IndexType* cols,
+                            const IndexType* factor_row_ptrs,
+                            const IndexType* factor_cols, IndexType size)
+{
+    unordered_set<IndexType> columns(exec);
+    bool valid = true;
+#pragma omp parallel for firstprivate(columns) reduction(&& : valid)
+    for (IndexType row = 0; row < size; row++) {
+        const auto in_begin = cols + row_ptrs[row];
+        const auto in_end = cols + row_ptrs[row + 1];
+        const auto factor_begin = factor_cols + factor_row_ptrs[row];
+        const auto factor_end = factor_cols + factor_row_ptrs[row + 1];
+        if (!valid) {
+            continue;
+        }
+        columns.clear();
+        // the factor needs to contain the original matrix
+        // plus the diagonal if that was missing
+        columns.insert(in_begin, in_end);
+        columns.insert(row);
+        for (auto col_it = factor_begin; col_it < factor_end; ++col_it) {
+            const auto col = *col_it;
+            if (col >= row) {
+                break;
+            }
+            const auto dep_begin = factor_cols + factor_row_ptrs[col];
+            const auto dep_end = factor_cols + factor_row_ptrs[col + 1];
+            // insert the upper triangular part of the row
+            const auto dep_diag = std::find(dep_begin, dep_end, col);
+            columns.insert(dep_diag, dep_end);
+        }
+        // the factor should contain exactly these columns, no more
+        if (factor_end - factor_begin != columns.size()) {
+            valid = false;
+        }
+        for (auto col_it = factor_begin; col_it < factor_end; ++col_it) {
+            if (columns.find(*col_it) == columns.end()) {
+                valid = false;
+            }
+        }
+    }
+    return valid;
+}
+
+template <typename ValueType, typename IndexType>
+void symbolic_validate(
+    std::shared_ptr<const DefaultExecutor> exec,
+    const matrix::Csr<ValueType, IndexType>* system_matrix,
+    const matrix::Csr<ValueType, IndexType>* factors,
+    const matrix::csr::lookup_data<IndexType>& factors_lookup, bool& valid)
+{
+    valid = symbolic_validate_impl(
+        exec, system_matrix->get_const_row_ptrs(),
+        system_matrix->get_const_col_idxs(), factors->get_const_row_ptrs(),
+        factors->get_const_col_idxs(),
+        static_cast<IndexType>(system_matrix->get_size()[0]));
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
+    GKO_DECLARE_FACTORIZATION_SYMBOLIC_VALIDATE_KERNEL);
 
 
 }  // namespace factorization

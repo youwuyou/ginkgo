@@ -1,11 +1,13 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
+
+#include <type_traits>
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/types.hpp>
 
-
+#include "core/base/batch_instantiation.hpp"
 #include "core/base/batch_multi_vector_kernels.hpp"
 #include "core/base/device_matrix_data_kernels.hpp"
 #include "core/base/index_set_kernels.hpp"
@@ -15,13 +17,16 @@
 #include "core/components/format_conversion_kernels.hpp"
 #include "core/components/precision_conversion_kernels.hpp"
 #include "core/components/prefix_sum_kernels.hpp"
+#include "core/components/range_minimum_query_kernels.hpp"
 #include "core/components/reduce_array_kernels.hpp"
+#include "core/distributed/assembly_kernels.hpp"
 #include "core/distributed/index_map_kernels.hpp"
 #include "core/distributed/matrix_kernels.hpp"
 #include "core/distributed/partition_helpers_kernels.hpp"
 #include "core/distributed/partition_kernels.hpp"
 #include "core/distributed/vector_kernels.hpp"
 #include "core/factorization/cholesky_kernels.hpp"
+#include "core/factorization/elimination_forest_kernels.hpp"
 #include "core/factorization/factorization_kernels.hpp"
 #include "core/factorization/ic_kernels.hpp"
 #include "core/factorization/ilu_kernels.hpp"
@@ -49,6 +54,7 @@
 #include "core/preconditioner/batch_jacobi_kernels.hpp"
 #include "core/preconditioner/isai_kernels.hpp"
 #include "core/preconditioner/jacobi_kernels.hpp"
+#include "core/preconditioner/sor_kernels.hpp"
 #include "core/reorder/rcm_kernels.hpp"
 #include "core/solver/batch_bicgstab_kernels.hpp"
 #include "core/solver/batch_cg_kernels.hpp"
@@ -57,6 +63,7 @@
 #include "core/solver/cb_gmres_kernels.hpp"
 #include "core/solver/cg_kernels.hpp"
 #include "core/solver/cgs_kernels.hpp"
+#include "core/solver/chebyshev_kernels.hpp"
 #include "core/solver/common_gmres_kernels.hpp"
 #include "core/solver/fcg_kernels.hpp"
 #include "core/solver/gcr_kernels.hpp"
@@ -64,7 +71,9 @@
 #include "core/solver/idr_kernels.hpp"
 #include "core/solver/ir_kernels.hpp"
 #include "core/solver/lower_trs_kernels.hpp"
+#include "core/solver/minres_kernels.hpp"
 #include "core/solver/multigrid_kernels.hpp"
+#include "core/solver/pipe_cg_kernels.hpp"
 #include "core/solver/upper_trs_kernels.hpp"
 #include "core/stop/criterion_kernels.hpp"
 #include "core/stop/residual_norm_kernels.hpp"
@@ -77,20 +86,31 @@
 
 #define GKO_STUB(_macro) _macro GKO_NOT_COMPILED(GKO_HOOK_MODULE)
 
-#define GKO_STUB_VALUE_CONVERSION(_macro)                             \
-    template <typename SourceType, typename TargetType>               \
-    _macro(SourceType, TargetType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
-    GKO_INSTANTIATE_FOR_EACH_VALUE_CONVERSION(_macro)
+
+#define GKO_STUB_NON_COMPLEX_VALUE_TYPE_BASE(_macro)     \
+    template <typename ValueType>                        \
+    _macro(ValueType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE_BASE(_macro)
 
 #define GKO_STUB_NON_COMPLEX_VALUE_TYPE(_macro)          \
     template <typename ValueType>                        \
     _macro(ValueType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE(_macro)
 
+#define GKO_STUB_VALUE_TYPE_BASE(_macro)                 \
+    template <typename ValueType>                        \
+    _macro(ValueType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE_BASE(_macro)
+
 #define GKO_STUB_VALUE_TYPE(_macro)                      \
     template <typename ValueType>                        \
     _macro(ValueType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(_macro)
+
+#define GKO_STUB_VALUE_AND_SCALAR_TYPE_BASE(_macro)                  \
+    template <typename ValueType, typename ScalarType>               \
+    _macro(ValueType, ScalarType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_VALUE_AND_SCALAR_TYPE_BASE(_macro)
 
 #define GKO_STUB_VALUE_AND_SCALAR_TYPE(_macro)                       \
     template <typename ValueType, typename ScalarType>               \
@@ -107,20 +127,42 @@
     _macro(LocalIndexType, GlobalIndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_LOCAL_GLOBAL_INDEX_TYPE(_macro)
 
+#define GKO_STUB_NON_COMPLEX_VALUE_AND_INDEX_TYPE_BASE(_macro)      \
+    template <typename ValueType, typename IndexType>               \
+    _macro(ValueType, IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_AND_INDEX_TYPE_BASE(_macro)
+
 #define GKO_STUB_NON_COMPLEX_VALUE_AND_INDEX_TYPE(_macro)           \
     template <typename ValueType, typename IndexType>               \
     _macro(ValueType, IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_AND_INDEX_TYPE(_macro)
+
+#define GKO_STUB_VALUE_AND_INDEX_TYPE_BASE(_macro)                  \
+    template <typename ValueType, typename IndexType>               \
+    _macro(ValueType, IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE_BASE(_macro)
 
 #define GKO_STUB_VALUE_AND_INDEX_TYPE(_macro)                       \
     template <typename ValueType, typename IndexType>               \
     _macro(ValueType, IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(_macro)
 
+#define GKO_STUB_VALUE_AND_INT32_TYPE_BASE(_macro)                  \
+    template <typename ValueType, typename IndexType>               \
+    _macro(ValueType, IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INT32_TYPE_BASE(_macro)
+
 #define GKO_STUB_VALUE_AND_INT32_TYPE(_macro)                       \
     template <typename ValueType, typename IndexType>               \
     _macro(ValueType, IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INT32_TYPE(_macro)
+
+#define GKO_STUB_MIXED_VALUE_AND_INDEX_TYPE_BASE(_macro)                \
+    template <typename InputValueType, typename MatrixValueType,        \
+              typename OutputValueType, typename IndexType>             \
+    _macro(InputValueType, MatrixValueType, OutputValueType, IndexType) \
+        GKO_NOT_COMPILED(GKO_HOOK_MODULE);                              \
+    GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_BASE(_macro)
 
 #define GKO_STUB_MIXED_VALUE_AND_INDEX_TYPE(_macro)                     \
     template <typename InputValueType, typename MatrixValueType,        \
@@ -129,6 +171,13 @@
         GKO_NOT_COMPILED(GKO_HOOK_MODULE);                              \
     GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE(_macro)
 
+#define GKO_STUB_MIXED_VALUE_AND_INDEX_TYPE_2_BASE(_macro)       \
+    template <typename InputValueType, typename OutputValueType, \
+              typename IndexType>                                \
+    _macro(InputValueType, OutputValueType, IndexType)           \
+        GKO_NOT_COMPILED(GKO_HOOK_MODULE);                       \
+    GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_2_BASE(_macro)
+
 #define GKO_STUB_MIXED_VALUE_AND_INDEX_TYPE_2(_macro)            \
     template <typename InputValueType, typename OutputValueType, \
               typename IndexType>                                \
@@ -136,22 +185,37 @@
         GKO_NOT_COMPILED(GKO_HOOK_MODULE);                       \
     GKO_INSTANTIATE_FOR_EACH_MIXED_VALUE_AND_INDEX_TYPE_2(_macro)
 
-#define GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE(_macro) \
-    template <typename ValueType, typename LocalIndexType, \
-              typename GlobalIndexType>                    \
-    _macro(ValueType, LocalIndexType, GlobalIndexType)     \
-        GKO_NOT_COMPILED(GKO_HOOK_MODULE);                 \
+#define GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE_BASE(_macro) \
+    template <typename ValueType, typename LocalIndexType,      \
+              typename GlobalIndexType>                         \
+    _macro(ValueType, LocalIndexType, GlobalIndexType)          \
+        GKO_NOT_COMPILED(GKO_HOOK_MODULE);                      \
     GKO_INSTANTIATE_FOR_EACH_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE(_macro)
+
+#define GKO_STUB_TEMPLATE_TYPE_BASE(_macro)              \
+    template <typename IndexType>                        \
+    _macro(IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_TEMPLATE_TYPE_BASE(_macro)
 
 #define GKO_STUB_TEMPLATE_TYPE(_macro)                   \
     template <typename IndexType>                        \
     _macro(IndexType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_TEMPLATE_TYPE(_macro)
 
+#define GKO_STUB_VALUE_CONVERSION_BASE(_macro)                        \
+    template <typename SourceType, typename TargetType>               \
+    _macro(SourceType, TargetType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_VALUE_CONVERSION_BASE(_macro)
+
 #define GKO_STUB_VALUE_CONVERSION(_macro)                             \
     template <typename SourceType, typename TargetType>               \
     _macro(SourceType, TargetType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_VALUE_CONVERSION(_macro)
+
+#define GKO_STUB_VALUE_CONVERSION_OR_COPY_BASE(_macro)                \
+    template <typename SourceType, typename TargetType>               \
+    _macro(SourceType, TargetType) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
+    GKO_INSTANTIATE_FOR_EACH_VALUE_CONVERSION_OR_COPY_BASE(_macro)
 
 #define GKO_STUB_VALUE_CONVERSION_OR_COPY(_macro)                     \
     template <typename SourceType, typename TargetType>               \
@@ -168,6 +232,13 @@
     _macro(ValueType, ValueTypeKrylovBases) GKO_NOT_COMPILED(GKO_HOOK_MODULE); \
     GKO_INSTANTIATE_FOR_EACH_CB_GMRES_CONST_TYPE(_macro)
 
+#define GKO_STUB_BATCH_VALUE_MATRIX_PRECONDITIONER_BASE(_declare, _wrapper)    \
+    template <typename ValueType, typename BatchMatrixType, typename PrecType> \
+    _declare(ValueType, BatchMatrixType, PrecType)                             \
+        GKO_NOT_COMPILED(GKO_HOOK_MODULE);                                     \
+    GKO_INSTANTIATE_FOR_BATCH_VALUE_MATRIX_PRECONDITIONER_BASE(_wrapper)
+
+
 namespace gko {
 namespace kernels {
 namespace GKO_HOOK_MODULE {
@@ -182,6 +253,11 @@ template GKO_DECLARE_PREFIX_SUM_NONNEGATIVE_KERNEL(size_type);
 
 GKO_STUB_TEMPLATE_TYPE(GKO_DECLARE_FILL_ARRAY_KERNEL);
 template GKO_DECLARE_FILL_ARRAY_KERNEL(bool);
+template GKO_DECLARE_FILL_ARRAY_KERNEL(uint16);
+template GKO_DECLARE_FILL_ARRAY_KERNEL(uint32);
+#ifndef GKO_SIZE_T_IS_UINT64_T
+template GKO_DECLARE_FILL_ARRAY_KERNEL(uint64);
+#endif
 
 GKO_STUB_TEMPLATE_TYPE(GKO_DECLARE_FILL_SEQ_ARRAY_KERNEL);
 GKO_STUB_TEMPLATE_TYPE(GKO_DECLARE_REDUCE_ADD_ARRAY_KERNEL);
@@ -215,6 +291,18 @@ GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_CONVERT_PTRS_TO_SIZES);
 }  // namespace components
 
 
+namespace range_minimum_query {
+
+
+GKO_STUB_INDEX_TYPE(
+    GKO_DECLARE_RANGE_MINIMUM_QUERY_COMPUTE_LOOKUP_SMALL_KERNEL);
+GKO_STUB_INDEX_TYPE(
+    GKO_DECLARE_RANGE_MINIMUM_QUERY_COMPUTE_LOOKUP_LARGE_KERNEL);
+
+
+}  // namespace range_minimum_query
+
+
 namespace idx_set {
 
 
@@ -237,6 +325,7 @@ GKO_STUB_INDEX_TYPE(GKO_PARTITION_BUILD_FROM_MAPPING);
 GKO_STUB_INDEX_TYPE(GKO_PARTITION_BUILD_FROM_GLOBAL_SIZE);
 GKO_STUB_LOCAL_GLOBAL_TYPE(GKO_DECLARE_PARTITION_BUILD_STARTING_INDICES);
 GKO_STUB_LOCAL_GLOBAL_TYPE(GKO_DECLARE_PARTITION_IS_ORDERED);
+GKO_STUB(GKO_DECLARE_PARTITION_BUILD_RANGES_BY_PART);
 
 
 }  // namespace partition
@@ -258,6 +347,7 @@ namespace index_map {
 
 GKO_STUB_LOCAL_GLOBAL_TYPE(GKO_DECLARE_INDEX_MAP_BUILD_MAPPING);
 GKO_STUB_LOCAL_GLOBAL_TYPE(GKO_DECLARE_INDEX_MAP_MAP_TO_LOCAL);
+GKO_STUB_LOCAL_GLOBAL_TYPE(GKO_DECLARE_INDEX_MAP_MAP_TO_GLOBAL);
 
 
 }  // namespace index_map
@@ -266,16 +356,29 @@ GKO_STUB_LOCAL_GLOBAL_TYPE(GKO_DECLARE_INDEX_MAP_MAP_TO_LOCAL);
 namespace distributed_vector {
 
 
-GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE(
+GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE_BASE(
     GKO_DECLARE_DISTRIBUTED_VECTOR_BUILD_LOCAL);
 
 
 }
 
+
+namespace assembly {
+
+
+GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE_BASE(
+    GKO_DECLARE_COUNT_NON_OWNING_ENTRIES);
+GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE_BASE(GKO_DECLARE_FILL_SEND_BUFFERS);
+
+
+}  // namespace assembly
+
+
 namespace distributed_matrix {
 
 
-GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE(GKO_DECLARE_SEPARATE_LOCAL_NONLOCAL);
+GKO_STUB_VALUE_AND_LOCAL_GLOBAL_INDEX_TYPE_BASE(
+    GKO_DECLARE_SEPARATE_LOCAL_NONLOCAL);
 
 
 }  // namespace distributed_matrix
@@ -421,7 +524,9 @@ GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_DIAGONAL_FILL_IN_MATRIX_DATA_KERNEL);
 namespace batch_bicgstab {
 
 
-GKO_STUB_VALUE_TYPE(GKO_DECLARE_BATCH_BICGSTAB_APPLY_KERNEL);
+GKO_STUB_BATCH_VALUE_MATRIX_PRECONDITIONER_BASE(
+    GKO_DECLARE_BATCH_BICGSTAB_APPLY_KERNEL,
+    GKO_DECLARE_BATCH_BICGSTAB_APPLY_KERNEL_WRAPPER);
 
 
 }  // namespace batch_bicgstab
@@ -430,7 +535,9 @@ GKO_STUB_VALUE_TYPE(GKO_DECLARE_BATCH_BICGSTAB_APPLY_KERNEL);
 namespace batch_cg {
 
 
-GKO_STUB_VALUE_TYPE(GKO_DECLARE_BATCH_CG_APPLY_KERNEL);
+GKO_STUB_BATCH_VALUE_MATRIX_PRECONDITIONER_BASE(
+    GKO_DECLARE_BATCH_CG_APPLY_KERNEL,
+    GKO_DECLARE_BATCH_CG_APPLY_KERNEL_WRAPPER);
 
 
 }  // namespace batch_cg
@@ -489,6 +596,18 @@ GKO_STUB_VALUE_TYPE(GKO_DECLARE_FCG_STEP_2_KERNEL);
 
 
 }  // namespace fcg
+
+
+namespace pipe_cg {
+
+
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_PIPE_CG_INITIALIZE_1_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_PIPE_CG_INITIALIZE_2_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_PIPE_CG_STEP_1_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_PIPE_CG_STEP_2_KERNEL);
+
+
+}  // namespace pipe_cg
 
 
 namespace bicgstab {
@@ -554,6 +673,7 @@ namespace gmres {
 
 GKO_STUB_VALUE_TYPE(GKO_DECLARE_GMRES_RESTART_KERNEL);
 GKO_STUB_VALUE_TYPE(GKO_DECLARE_GMRES_MULTI_AXPY_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_GMRES_MULTI_DOT_KERNEL);
 
 
 }  // namespace gmres
@@ -562,13 +682,23 @@ GKO_STUB_VALUE_TYPE(GKO_DECLARE_GMRES_MULTI_AXPY_KERNEL);
 namespace cb_gmres {
 
 
-GKO_STUB_VALUE_TYPE(GKO_DECLARE_CB_GMRES_INITIALIZE_KERNEL);
+GKO_STUB_VALUE_TYPE_BASE(GKO_DECLARE_CB_GMRES_INITIALIZE_KERNEL);
 GKO_STUB_CB_GMRES(GKO_DECLARE_CB_GMRES_RESTART_KERNEL);
 GKO_STUB_CB_GMRES(GKO_DECLARE_CB_GMRES_ARNOLDI_KERNEL);
 GKO_STUB_CB_GMRES_CONST(GKO_DECLARE_CB_GMRES_SOLVE_KRYLOV_KERNEL);
 
 
 }  // namespace cb_gmres
+
+
+namespace chebyshev {
+
+
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_CHEBYSHEV_INIT_UPDATE_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_CHEBYSHEV_UPDATE_KERNEL);
+
+
+}  // namespace chebyshev
 
 
 namespace ir {
@@ -589,6 +719,17 @@ GKO_STUB_NON_COMPLEX_VALUE_TYPE(GKO_DECLARE_MULTIGRID_KCYCLE_CHECK_STOP_KERNEL);
 
 
 }  // namespace multigrid
+
+
+namespace minres {
+
+
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_MINRES_INITIALIZE_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_MINRES_STEP_1_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_MINRES_STEP_2_KERNEL);
+
+
+}  // namespace minres
 
 
 namespace sparsity_csr {
@@ -650,6 +791,7 @@ GKO_STUB_VALUE_AND_INDEX_TYPE(
 GKO_STUB_INDEX_TYPE(GKO_DECLARE_CSR_BUILD_LOOKUP_OFFSETS_KERNEL);
 GKO_STUB_INDEX_TYPE(GKO_DECLARE_CSR_BUILD_LOOKUP_KERNEL);
 GKO_STUB_INDEX_TYPE(GKO_DECLARE_CSR_BENCHMARK_LOOKUP_KERNEL);
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CSR_ROW_WISE_ABSOLUTE_SUM);
 
 template <typename ValueType, typename IndexType>
 GKO_DECLARE_CSR_SCALE_KERNEL(ValueType, IndexType)
@@ -692,6 +834,7 @@ GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_COO_SPMV2_KERNEL);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_COO_ADVANCED_SPMV2_KERNEL);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_COO_FILL_IN_DENSE_KERNEL);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_COO_EXTRACT_DIAGONAL_KERNEL);
+GKO_STUB_VALUE_TYPE(GKO_DECLARE_COO_CONJ_ARRAY_KERNEL);
 
 
 }  // namespace coo
@@ -720,17 +863,17 @@ namespace fft {
 template <typename ValueType>
 GKO_DECLARE_FFT_KERNEL(ValueType)
 GKO_NOT_COMPILED(GKO_HOOK_MODULE);
-GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE(GKO_DECLARE_FFT_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE_BASE(GKO_DECLARE_FFT_KERNEL);
 
 template <typename ValueType>
 GKO_DECLARE_FFT2_KERNEL(ValueType)
 GKO_NOT_COMPILED(GKO_HOOK_MODULE);
-GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE(GKO_DECLARE_FFT2_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE_BASE(GKO_DECLARE_FFT2_KERNEL);
 
 template <typename ValueType>
 GKO_DECLARE_FFT3_KERNEL(ValueType)
 GKO_NOT_COMPILED(GKO_HOOK_MODULE);
-GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE(GKO_DECLARE_FFT3_KERNEL);
+GKO_INSTANTIATE_FOR_EACH_NON_COMPLEX_VALUE_TYPE_BASE(GKO_DECLARE_FFT3_KERNEL);
 
 
 }  // namespace fft
@@ -814,9 +957,21 @@ GKO_STUB_VALUE_TYPE(GKO_DECLARE_JACOBI_SCALAR_CONJ_KERNEL);
 GKO_STUB_VALUE_TYPE(GKO_DECLARE_JACOBI_INVERT_DIAGONAL_KERNEL);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_JACOBI_CONVERT_TO_DENSE_KERNEL);
 GKO_STUB(GKO_DECLARE_JACOBI_INITIALIZE_PRECISIONS_KERNEL);
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_JACOBI_SCALAR_L1_KERNEL);
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_JACOBI_BLOCK_L1_KERNEL);
 
 
 }  // namespace jacobi
+
+
+namespace sor {
+
+
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_SOR_INITIALIZE_WEIGHTED_L);
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_SOR_INITIALIZE_WEIGHTED_L_U);
+
+
+}  // namespace sor
 
 
 namespace isai {
@@ -837,12 +992,20 @@ namespace cholesky {
 
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CHOLESKY_SYMBOLIC_COUNT);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CHOLESKY_SYMBOLIC_FACTORIZE);
-GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CHOLESKY_FOREST_FROM_FACTOR);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CHOLESKY_INITIALIZE);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_CHOLESKY_FACTORIZE);
 
 
 }  // namespace cholesky
+
+
+namespace elimination_forest {
+
+
+GKO_STUB_INDEX_TYPE(GKO_DECLARE_ELIMINATION_FOREST_COMPUTE_SKELETON_TREE);
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_ELIMINATION_FOREST_FROM_FACTOR);
+
+}  // namespace elimination_forest
 
 
 namespace factorization {
@@ -856,6 +1019,8 @@ GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_FACTORIZATION_INITIALIZE_L_U_KERNEL);
 GKO_STUB_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_FACTORIZATION_INITIALIZE_ROW_PTRS_L_KERNEL);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_FACTORIZATION_INITIALIZE_L_KERNEL);
+GKO_STUB_VALUE_AND_INDEX_TYPE(
+    GKO_DECLARE_FACTORIZATION_SYMBOLIC_VALIDATE_KERNEL);
 
 
 }  // namespace factorization
@@ -864,7 +1029,7 @@ GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_FACTORIZATION_INITIALIZE_L_KERNEL);
 namespace ic_factorization {
 
 
-GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_IC_COMPUTE_KERNEL);
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_IC_SPARSELIB_IC_KERNEL);
 
 
 }  // namespace ic_factorization
@@ -873,7 +1038,7 @@ GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_IC_COMPUTE_KERNEL);
 namespace ilu_factorization {
 
 
-GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_ILU_COMPUTE_LU_KERNEL);
+GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_ILU_SPARSELIB_ILU_KERNEL);
 
 
 }  // namespace ilu_factorization
@@ -956,7 +1121,6 @@ GKO_STUB_INDEX_TYPE(GKO_DECLARE_PGM_COUNT_UNREPEATED_NNZ_KERNEL);
 GKO_STUB_NON_COMPLEX_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_PGM_FIND_STRONGEST_NEIGHBOR);
 GKO_STUB_NON_COMPLEX_VALUE_AND_INDEX_TYPE(GKO_DECLARE_PGM_ASSIGN_TO_EXIST_AGG);
-GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_PGM_SORT_ROW_MAJOR);
 GKO_STUB_VALUE_AND_INDEX_TYPE(GKO_DECLARE_PGM_COMPUTE_COARSE_COO);
 GKO_STUB_INDEX_TYPE(GKO_DECLARE_PGM_GATHER_INDEX);
 

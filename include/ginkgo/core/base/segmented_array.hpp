@@ -1,10 +1,12 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#pragma once
-#include <numeric>
+#ifndef GKO_PUBLIC_CORE_BASE_SEGMENTED_ARRAY_HPP_
+#define GKO_PUBLIC_CORE_BASE_SEGMENTED_ARRAY_HPP_
 
+
+#include <numeric>
 
 #include <ginkgo/config.hpp>
 #include <ginkgo/core/base/array.hpp>
@@ -150,12 +152,11 @@ struct temporary_clone_helper<segmented_array<T>> {
         bool copy_data)
     {
         if (copy_data) {
-            return std::make_unique<segmented_array<T>>(
-                make_array_view(exec, ptr->get_size(), ptr->get_flat_data()),
-                ptr->get_offsets());
+            return std::make_unique<segmented_array<T>>(std::move(exec), *ptr);
         } else {
-            return std::make_unique<segmented_array<T>>(std::move(exec),
-                                                        ptr->get_offsets());
+            return std::unique_ptr<segmented_array<T>>(
+                new segmented_array<T>(segmented_array<T>::create_from_offsets(
+                    array<int64>(std::move(exec), ptr->get_offsets()))));
         }
     }
 };
@@ -166,9 +167,7 @@ struct temporary_clone_helper<const segmented_array<T>> {
         std::shared_ptr<const Executor> exec, const segmented_array<T>* ptr,
         bool)
     {
-        return std::make_unique<segmented_array<T>>(
-            make_array_view(exec, ptr->get_size(), ptr->get_const_flat_data()),
-            ptr->get_offsets());
+        return std::make_unique<segmented_array<T>>(std::move(exec), *ptr);
     }
 };
 
@@ -184,3 +183,5 @@ public:
 
 }  // namespace detail
 }  // namespace gko
+
+#endif  // GKO_PUBLIC_CORE_BASE_SEGMENTED_ARRAY_HPP_

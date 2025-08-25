@@ -1,17 +1,14 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/multigrid/pgm_kernels.hpp"
 
-
 #include <fstream>
 #include <random>
 #include <string>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -24,12 +21,11 @@
 #include <ginkgo/core/stop/iteration.hpp>
 #include <ginkgo/core/stop/residual_norm.hpp>
 
-
 #include "core/test/utils.hpp"
 #include "core/test/utils/matrix_generator.hpp"
 #include "core/test/utils/unsort_matrix.hpp"
 #include "core/utils/matrix_utils.hpp"
-#include "test/utils/executor.hpp"
+#include "test/utils/common_fixture.hpp"
 
 
 class Pgm : public CommonTestFixture {
@@ -82,9 +78,15 @@ protected:
 
     void initialize_data()
     {
+#ifdef GINKGO_FAST_TESTS
+        m = 129;
+        n = 65;
+        int nrhs = 2;
+#else
         m = 597;
         n = 300;
         int nrhs = 3;
+#endif
 
         agg = gen_agg_array(m, n);
         // only use 0 ~ n-2 and ensure the end isolated and not yet finished
@@ -159,8 +161,8 @@ TEST_F(Pgm, MatchEdgeIsEquivalentToRef)
     auto d_x = d_unfinished_agg;
 
     gko::kernels::reference::pgm::match_edge(ref, strongest_neighbor, x);
-    gko::kernels::EXEC_NAMESPACE::pgm::match_edge(exec, d_strongest_neighbor,
-                                                  d_x);
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::match_edge(
+        exec, d_strongest_neighbor, d_x);
 
     GKO_ASSERT_ARRAY_EQ(d_x, x);
 }
@@ -173,8 +175,8 @@ TEST_F(Pgm, CountUnaggIsEquivalentToRef)
     index_type d_num_unagg;
 
     gko::kernels::reference::pgm::count_unagg(ref, unfinished_agg, &num_unagg);
-    gko::kernels::EXEC_NAMESPACE::pgm::count_unagg(exec, d_unfinished_agg,
-                                                   &d_num_unagg);
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::count_unagg(exec, d_unfinished_agg,
+                                                         &d_num_unagg);
 
     ASSERT_EQ(d_num_unagg, num_unagg);
 }
@@ -187,7 +189,7 @@ TEST_F(Pgm, RenumberIsEquivalentToRef)
     index_type d_num_agg;
 
     gko::kernels::reference::pgm::renumber(ref, agg, &num_agg);
-    gko::kernels::EXEC_NAMESPACE::pgm::renumber(exec, d_agg, &d_num_agg);
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::renumber(exec, d_agg, &d_num_agg);
 
     ASSERT_EQ(d_num_agg, num_agg);
     GKO_ASSERT_ARRAY_EQ(d_agg, agg);
@@ -203,7 +205,7 @@ TEST_F(Pgm, FindStrongestNeighborIsEquivalentToRef)
 
     gko::kernels::reference::pgm::find_strongest_neighbor(
         ref, weight_csr.get(), weight_diag.get(), agg, snb);
-    gko::kernels::EXEC_NAMESPACE::pgm::find_strongest_neighbor(
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::find_strongest_neighbor(
         exec, d_weight_csr.get(), d_weight_diag.get(), d_agg, d_snb);
 
     GKO_ASSERT_ARRAY_EQ(d_snb, snb);
@@ -220,7 +222,7 @@ TEST_F(Pgm, AssignToExistAggIsEquivalentToRef)
 
     gko::kernels::reference::pgm::assign_to_exist_agg(
         ref, weight_csr.get(), weight_diag.get(), x, intermediate_agg);
-    gko::kernels::EXEC_NAMESPACE::pgm::assign_to_exist_agg(
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::assign_to_exist_agg(
         exec, d_weight_csr.get(), d_weight_diag.get(), d_x, d_intermediate_agg);
 
     GKO_ASSERT_ARRAY_EQ(d_x, x);
@@ -234,9 +236,10 @@ TEST_F(Pgm, AssignToExistAggUnderteminsticIsEquivalentToRef)
     auto d_intermediate_agg = gko::array<index_type>(exec, 0);
     index_type d_num_unagg;
 
-    gko::kernels::EXEC_NAMESPACE::pgm::assign_to_exist_agg(
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::assign_to_exist_agg(
         exec, d_weight_csr.get(), d_weight_diag.get(), d_x, d_intermediate_agg);
-    gko::kernels::EXEC_NAMESPACE::pgm::count_unagg(exec, d_agg, &d_num_unagg);
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::count_unagg(exec, d_agg,
+                                                         &d_num_unagg);
 
     // only test whether all elements are aggregated.
     GKO_ASSERT_EQ(d_num_unagg, 0);
@@ -257,7 +260,7 @@ TEST_F(Pgm, GatherIndexIsEquivalentToRef)
     gko::kernels::reference::pgm::gather_index(ref, num, orig.get_const_data(),
                                                map.get_const_data(),
                                                result.get_data());
-    gko::kernels::EXEC_NAMESPACE::pgm::gather_index(
+    gko::kernels::GKO_DEVICE_NAMESPACE::pgm::gather_index(
         exec, num, d_orig.get_const_data(), d_map.get_const_data(),
         d_result.get_data());
 

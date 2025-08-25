@@ -1,9 +1,8 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/distributed/vector_kernels.hpp"
-
 
 #include "core/components/prefix_sum_kernels.hpp"
 #include "reference/distributed/partition_helpers.hpp"

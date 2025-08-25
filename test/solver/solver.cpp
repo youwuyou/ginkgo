@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,9 +8,7 @@
 #include <random>
 #include <vector>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/matrix_data.hpp>
 #include <ginkgo/core/base/name_demangling.hpp>
@@ -22,19 +20,21 @@
 #include <ginkgo/core/solver/cb_gmres.hpp>
 #include <ginkgo/core/solver/cg.hpp>
 #include <ginkgo/core/solver/cgs.hpp>
+#include <ginkgo/core/solver/chebyshev.hpp>
 #include <ginkgo/core/solver/fcg.hpp>
 #include <ginkgo/core/solver/gcr.hpp>
 #include <ginkgo/core/solver/gmres.hpp>
 #include <ginkgo/core/solver/idr.hpp>
 #include <ginkgo/core/solver/ir.hpp>
+#include <ginkgo/core/solver/minres.hpp>
+#include <ginkgo/core/solver/pipe_cg.hpp>
 #include <ginkgo/core/solver/triangular.hpp>
 #include <ginkgo/core/stop/iteration.hpp>
 #include <ginkgo/core/stop/residual_norm.hpp>
 
-
 #include "core/test/utils.hpp"
 #include "core/utils/matrix_utils.hpp"
-#include "test/utils/executor.hpp"
+#include "test/utils/common_fixture.hpp"
 
 
 #if GINKGO_COMMON_SINGLE_MODE
@@ -126,6 +126,11 @@ struct Fcg : SimpleSolverTest<gko::solver::Fcg<solver_value_type>> {
 };
 
 
+struct PipeCg : SimpleSolverTest<gko::solver::PipeCg<solver_value_type>> {
+    static double tolerance() { return 1e7 * r<value_type>::value; }
+};
+
+
 struct Bicg : SimpleSolverTest<gko::solver::Bicg<solver_value_type>> {
     static constexpr bool will_not_allocate() { return false; }
 };
@@ -175,6 +180,21 @@ struct Ir : SimpleSolverTest<gko::solver::Ir<solver_value_type>> {
         gko::ptr_param<const solver_type> solver)
     {
         return solver->get_solver().get();
+    }
+};
+
+
+struct Chebyshev : SimpleSolverTest<gko::solver::Chebyshev<solver_value_type>> {
+    static double tolerance() { return 1e7 * r<value_type>::value; }
+
+    static typename solver_type::parameters_type build_preconditioned(
+        std::shared_ptr<const gko::Executor> exec,
+        gko::size_type iteration_count, bool check_residual = true)
+    {
+        return SimpleSolverTest<gko::solver::Chebyshev<solver_value_type>>::
+            build(exec, iteration_count, check_residual)
+                .with_preconditioner(
+                    precond_type::build().with_max_block_size(1u));
     }
 };
 
@@ -453,6 +473,22 @@ struct UpperTrsSyncfreeUnitdiag : UpperTrs {
 };
 
 
+struct Minres : SimpleSolverTest<gko::solver::Minres<solver_value_type>> {
+    static void preprocess(gko::matrix_data<value_type, index_type>& data)
+    {
+        // make sure the matrix is well-conditioned
+        gko::utils::make_hpd(data, 2.0);
+        // only positive diagonal values to ensure that the
+        // preconditioner is SPD
+        for (auto& nz : data.nonzeros) {
+            if (nz.row == nz.column) {
+                nz.value = std::abs(nz.value);
+            }
+        }
+    }
+};
+
+
 template <typename ObjectType>
 struct test_pair {
     std::shared_ptr<ObjectType> ref;
@@ -523,7 +559,7 @@ protected:
     using Precond = typename T::precond_type;
     using Mtx = typename T::matrix_type;
     using value_type = typename Mtx::value_type;
-    using mixed_value_type = gko::next_precision<value_type>;
+    using mixed_value_type = gko::next_precision_base<value_type>;
     using Vec = gko::matrix::Dense<value_type>;
     using MixedVec = gko::matrix::Dense<mixed_value_type>;
 
@@ -887,12 +923,12 @@ protected:
 };
 
 using SolverTypes =
-    ::testing::Types<Cg, Cgs, Fcg, Bicg, Bicgstab,
+    ::testing::Types<Cg, Cgs, Fcg, PipeCg, Bicg, Bicgstab,
                      /* "IDR uses different initialization approaches even when
                         deterministic", Idr<1>, Idr<4>,*/
-                     Ir, CbGmres<2>, CbGmres<10>, Gmres<2>, Gmres<10>,
-                     FGmres<2>, FGmres<10>, Gcr<2>, Gcr<10>, LowerTrs, UpperTrs,
-                     LowerTrsUnitdiag, UpperTrsUnitdiag
+                     Ir, Chebyshev, CbGmres<2>, CbGmres<10>, Gmres<2>,
+                     Gmres<10>, FGmres<2>, FGmres<10>, Gcr<2>, Gcr<10>, Minres,
+                     LowerTrs, UpperTrs, LowerTrsUnitdiag, UpperTrsUnitdiag
 #ifdef GKO_COMPILING_CUDA
                      ,
                      LowerTrsSyncfree, UpperTrsSyncfree,

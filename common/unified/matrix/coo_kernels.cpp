@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/coo_kernels.hpp"
 
-
 #include <ginkgo/core/base/math.hpp>
-
 
 #include "common/unified/base/kernel_launch.hpp"
 
@@ -62,6 +60,21 @@ void fill_in_dense(std::shared_ptr<const DefaultExecutor> exec,
 
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(
     GKO_DECLARE_COO_FILL_IN_DENSE_KERNEL);
+
+
+template <typename ValueType>
+void conj_array(std::shared_ptr<const DefaultExecutor> exec,
+                size_type num_elems, ValueType* values)
+{
+    run_kernel(
+        exec,
+        [] GKO_KERNEL(auto tidx, auto values) {
+            values[tidx] = conj(values[tidx]);
+        },
+        num_elems, values);
+}
+
+GKO_INSTANTIATE_FOR_EACH_VALUE_TYPE(GKO_DECLARE_COO_CONJ_ARRAY_KERNEL);
 
 
 }  // namespace coo

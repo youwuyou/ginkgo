@@ -1,24 +1,18 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-// force-top: on
-// oneDPL needs to be first to avoid issues with libstdc++ TBB impl
 #include <oneapi/dpl/algorithm>
-// force-top: off
-
 
 #include "core/multigrid/pgm_kernels.hpp"
 
-
 #include <memory>
-
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 
-
 #include "dpcpp/base/onedpl.hpp"
+#include "dpcpp/components/atomic.dp.hpp"
 
 
 namespace gko {
@@ -30,6 +24,35 @@ namespace dpcpp {
  * @ingroup pgm
  */
 namespace pgm {
+
+
+template <typename IndexType>
+void match_edge(std::shared_ptr<const DefaultExecutor> exec,
+                const array<IndexType>& strongest_neighbor,
+                array<IndexType>& agg)
+{
+    exec->get_queue()->submit([size = agg.get_size(), agg = agg.get_data(),
+                               strongest_neighbor =
+                                   strongest_neighbor.get_const_data()](
+                                  sycl::handler& cgh) {
+        cgh.parallel_for(
+            sycl::range<1>{static_cast<std::size_t>(size)},
+            [=](sycl::id<1> idx_id) {
+                auto tidx = static_cast<IndexType>(idx_id[0]);
+                if (load(agg + tidx, sycl::memory_order_relaxed) != -1) {
+                    return;
+                }
+                auto neighbor = strongest_neighbor[tidx];
+                if (neighbor != -1 && strongest_neighbor[neighbor] == tidx &&
+                    tidx <= neighbor) {
+                    store(agg + tidx, tidx, sycl::memory_order_relaxed);
+                    store(agg + neighbor, tidx, sycl::memory_order_relaxed);
+                }
+            });
+    });
+}
+
+GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_PGM_MATCH_EDGE_KERNEL);
 
 
 template <typename IndexType>
@@ -45,25 +68,6 @@ void sort_agg(std::shared_ptr<const DefaultExecutor> exec, IndexType num,
 }
 
 GKO_INSTANTIATE_FOR_EACH_INDEX_TYPE(GKO_DECLARE_PGM_SORT_AGG_KERNEL);
-
-
-template <typename ValueType, typename IndexType>
-void sort_row_major(std::shared_ptr<const DefaultExecutor> exec, size_type nnz,
-                    IndexType* row_idxs, IndexType* col_idxs, ValueType* vals)
-{
-    auto policy = onedpl_policy(exec);
-    auto it = oneapi::dpl::make_zip_iterator(row_idxs, col_idxs, vals);
-    // Because reduce_by_segment is not deterministic, so we do not need
-    // stable_sort
-    // TODO: If we have deterministic reduce_by_segment, it should be
-    // stable_sort
-    std::sort(policy, it, it + nnz, [](auto a, auto b) {
-        return std::tie(std::get<0>(a), std::get<1>(a)) <
-               std::tie(std::get<0>(b), std::get<1>(b));
-    });
-}
-
-GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(GKO_DECLARE_PGM_SORT_ROW_MAJOR);
 
 
 template <typename ValueType, typename IndexType>

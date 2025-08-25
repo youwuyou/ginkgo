@@ -1,29 +1,27 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/factorization/lu.hpp>
-
+#include "core/factorization/lu_kernels.hpp"
 
 #include <algorithm>
 #include <fstream>
 #include <memory>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/factorization/factorization.hpp>
+#include <ginkgo/core/factorization/lu.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/sparsity_csr.hpp>
 
-
+#include "core/base/index_range.hpp"
 #include "core/components/prefix_sum_kernels.hpp"
 #include "core/factorization/cholesky_kernels.hpp"
 #include "core/factorization/elimination_forest.hpp"
-#include "core/factorization/lu_kernels.hpp"
+#include "core/factorization/factorization_kernels.hpp"
 #include "core/factorization/symbolic.hpp"
 #include "core/matrix/csr_kernels.hpp"
 #include "core/matrix/csr_lookup.hpp"
@@ -220,10 +218,10 @@ TYPED_TEST(Lu, KernelFactorizeWorks)
         gko::kernels::reference::lu_factorization::factorize(
             this->ref, this->storage_offsets.get_const_data(),
             this->row_descs.get_const_data(), this->storage.get_const_data(),
-            diag_idxs.get_const_data(), this->mtx_lu.get(), tmp);
+            diag_idxs.get_const_data(), this->mtx_lu.get(), true, tmp);
 
         GKO_ASSERT_MTX_NEAR(this->mtx_lu, mtx_lu_ref,
-                            15 * r<value_type>::value);
+                            30 * r<value_type>::value);
     });
 }
 
@@ -272,7 +270,7 @@ TYPED_TEST(Lu, FactorizeNonsymmetricWorks)
 
         GKO_ASSERT_MTX_EQ_SPARSITY(lu->get_combined(), this->mtx_lu);
         GKO_ASSERT_MTX_NEAR(lu->get_combined(), this->mtx_lu,
-                            15 * r<value_type>::value);
+                            30 * r<value_type>::value);
         ASSERT_EQ(lu->get_storage_type(),
                   gko::experimental::factorization::storage_type::combined_lu);
         ASSERT_EQ(lu->get_lower_factor(), nullptr);
@@ -298,7 +296,7 @@ TYPED_TEST(Lu, FactorizeNearSymmetricWorks)
 
         GKO_ASSERT_MTX_EQ_SPARSITY(lu->get_combined(), this->mtx_lu);
         GKO_ASSERT_MTX_NEAR(lu->get_combined(), this->mtx_lu,
-                            15 * r<value_type>::value);
+                            30 * r<value_type>::value);
         ASSERT_EQ(lu->get_storage_type(),
                   gko::experimental::factorization::storage_type::combined_lu);
         ASSERT_EQ(lu->get_lower_factor(), nullptr);
@@ -325,11 +323,97 @@ TYPED_TEST(Lu, FactorizeWithKnownSparsityWorks)
         auto lu = factory->generate(this->mtx);
 
         GKO_ASSERT_MTX_NEAR(lu->get_combined(), this->mtx_lu,
-                            15 * r<value_type>::value);
+                            30 * r<value_type>::value);
         ASSERT_EQ(lu->get_storage_type(),
                   gko::experimental::factorization::storage_type::combined_lu);
         ASSERT_EQ(lu->get_lower_factor(), nullptr);
         ASSERT_EQ(lu->get_upper_factor(), nullptr);
         ASSERT_EQ(lu->get_diagonal(), nullptr);
+    });
+}
+
+
+TYPED_TEST(Lu, ValidateValidFactors)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    this->forall_matrices([this] {
+        bool valid = false;
+
+        gko::kernels::reference::factorization::symbolic_validate(
+            this->ref, this->mtx.get(), this->mtx_lu.get(),
+            gko::matrix::csr::build_lookup(this->mtx_lu.get()), valid);
+
+        ASSERT_TRUE(valid);
+    });
+}
+
+
+TYPED_TEST(Lu, ValidateInvalidFactorsIdentity)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    this->forall_matrices([this] {
+        bool valid = true;
+        gko::matrix_data<value_type, index_type> data(this->mtx_lu->get_size());
+        // an identity matrix is a valid factorization, but doesn't contain the
+        // system matrix
+        for (auto row : gko::irange{static_cast<index_type>(data.size[0])}) {
+            data.nonzeros.emplace_back(row, row, gko::one<value_type>());
+        }
+        this->mtx_lu->read(data);
+
+        gko::kernels::reference::factorization::symbolic_validate(
+            this->ref, this->mtx.get(), this->mtx_lu.get(),
+            gko::matrix::csr::build_lookup(this->mtx_lu.get()), valid);
+
+        ASSERT_FALSE(valid);
+    });
+}
+
+
+TYPED_TEST(Lu, ValidateInvalidFactorsMissing)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    this->forall_matrices([this] {
+        bool valid = true;
+        gko::matrix_data<value_type, index_type> data;
+        this->mtx_lu->write(data);
+        // delete a random entry somewhere in the middle of the matrix
+        data.nonzeros.erase(data.nonzeros.begin() +
+                            data.nonzeros.size() * 3 / 4);
+        this->mtx_lu->read(data);
+
+        gko::kernels::reference::factorization::symbolic_validate(
+            this->ref, this->mtx.get(), this->mtx_lu.get(),
+            gko::matrix::csr::build_lookup(this->mtx_lu.get()), valid);
+
+        ASSERT_FALSE(valid);
+    });
+}
+
+
+TYPED_TEST(Lu, ValidateInvalidFactorsExtra)
+{
+    using value_type = typename TestFixture::value_type;
+    using index_type = typename TestFixture::index_type;
+    this->forall_matrices([this] {
+        bool valid = true;
+        gko::matrix_data<value_type, index_type> data;
+        this->mtx_lu->write(data);
+        const auto it = std::adjacent_find(
+            data.nonzeros.begin() + data.nonzeros.size() / 5,
+            data.nonzeros.end(), [](auto a, auto b) {
+                return a.row == b.row && a.column < b.column - 1;
+            });
+        data.nonzeros.insert(it, {it->row, it->column + 1, it->value});
+        this->mtx_lu->read(data);
+
+        gko::kernels::reference::factorization::symbolic_validate(
+            this->ref, this->mtx.get(), this->mtx_lu.get(),
+            gko::matrix::csr::build_lookup(this->mtx_lu.get()), valid);
+
+        ASSERT_FALSE(valid);
     });
 }

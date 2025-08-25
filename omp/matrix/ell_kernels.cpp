@@ -1,21 +1,17 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/ell_kernels.hpp"
 
-
 #include <array>
 
-
 #include <omp.h>
-
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "accessor/reduced_row_major.hpp"
 #include "core/base/mixed_precision_types.hpp"
@@ -211,7 +207,9 @@ void advanced_spmv(std::shared_ptr<const OmpExecutor> exec,
     const auto alpha_val = arithmetic_type{alpha->at(0, 0)};
     const auto beta_val = arithmetic_type{beta->at(0, 0)};
     auto out = [&](auto i, auto j, auto value) {
-        return alpha_val * value + beta_val * arithmetic_type{c->at(i, j)};
+        return is_zero(beta_val) ? alpha_val * value
+                                 : alpha_val * value +
+                                       beta_val * arithmetic_type{c->at(i, j)};
     };
     if (num_rhs == 1) {
         spmv_small_rhs<1>(exec, a, b, c, out);

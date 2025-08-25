@@ -1,15 +1,12 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/factorization/par_ict_kernels.hpp"
 
-
 #include <limits>
 
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/math.hpp>
@@ -17,13 +14,14 @@
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 
-
 #include "core/components/prefix_sum_kernels.hpp"
 #include "core/matrix/coo_builder.hpp"
 #include "core/matrix/csr_builder.hpp"
 #include "core/matrix/csr_kernels.hpp"
 #include "core/synthesizer/implementation_selection.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
+#include "dpcpp/base/math.hpp"
+#include "dpcpp/base/types.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/intrinsics.dp.hpp"
 #include "dpcpp/components/merging.dp.hpp"
@@ -81,8 +79,8 @@ void ict_tri_spgeam_nnz(const IndexType* __restrict__ llh_row_ptrs,
             IndexType llh_col, IndexType out_nz, bool valid) {
             auto col = min(a_col, llh_col);
             // count the number of unique elements being merged
-            count +=
-                popcnt(subwarp.ballot(col <= row && a_col != llh_col && valid));
+            count += popcnt(group::ballot(
+                subwarp, col <= row && a_col != llh_col && valid));
             return true;
         });
     if (subwarp.thread_rank() == 0) {
@@ -173,7 +171,8 @@ void ict_tri_spgeam_init(const IndexType* __restrict__ llh_row_ptrs,
         auto llh_cur_val = subwarp.shfl(llh_val, merge_result.b_idx);
         auto valid = out_begin + lane < out_size;
         // check if the previous thread has matching columns
-        auto equal_mask = subwarp.ballot(a_cur_col == llh_cur_col && valid);
+        auto equal_mask =
+            group::ballot(subwarp, a_cur_col == llh_cur_col && valid);
         auto prev_equal_mask = equal_mask << 1 | skip_first;
         skip_first = bool(equal_mask >> (subgroup_size - 1));
         auto prev_equal = bool(prev_equal_mask & lanemask_eq);
@@ -203,7 +202,7 @@ void ict_tri_spgeam_init(const IndexType* __restrict__ llh_row_ptrs,
         // determine which threads will write output to L
         auto use_l = l_cur_col == r_col;
         auto do_write = !prev_equal && valid && r_col <= row;
-        auto l_new_advance_mask = subwarp.ballot(do_write);
+        auto l_new_advance_mask = group::ballot(subwarp, do_write);
         // store values
         if (do_write) {
             auto diag = l_vals[l_row_ptrs[r_col + 1] - 1];
@@ -216,7 +215,7 @@ void ict_tri_spgeam_init(const IndexType* __restrict__ llh_row_ptrs,
         // advance *_begin offsets
         auto a_advance = merge_result.a_advance;
         auto llh_advance = merge_result.b_advance;
-        auto l_advance = popcnt(subwarp.ballot(do_write && use_l));
+        auto l_advance = popcnt(group::ballot(subwarp, do_write && use_l));
         auto l_new_advance = popcnt(l_new_advance_mask);
         a_begin += a_advance;
         llh_begin += llh_advance;
@@ -347,7 +346,7 @@ void ict_sweep(const IndexType* __restrict__ a_row_ptrs,
                        conj(l_vals[lh_idx + lh_col_begin]);
             }
             // remember the transposed element
-            auto found_transp = subwarp.ballot(lh_row == row);
+            auto found_transp = group::ballot(subwarp, lh_row == row);
             if (found_transp) {
                 lh_nz =
                     subwarp.shfl(lh_idx + lh_col_begin, ffs(found_transp) - 1);
@@ -360,7 +359,7 @@ void ict_sweep(const IndexType* __restrict__ a_row_ptrs,
 
     if (subwarp.thread_rank() == 0) {
         auto to_write = row == col
-                            ? std::sqrt(a_val - sum)
+                            ? gko::sqrt(a_val - sum)
                             : (a_val - sum) / l_vals[l_row_ptrs[col + 1] - 1];
         if (is_finite(to_write)) {
             l_vals[l_nz] = to_write;
@@ -406,13 +405,13 @@ void add_candidates(syn::value_list<int, subgroup_size>,
     matrix::CsrBuilder<ValueType, IndexType> l_new_builder(l_new);
     auto llh_row_ptrs = llh->get_const_row_ptrs();
     auto llh_col_idxs = llh->get_const_col_idxs();
-    auto llh_vals = llh->get_const_values();
+    auto llh_vals = as_device_type(llh->get_const_values());
     auto a_row_ptrs = a->get_const_row_ptrs();
     auto a_col_idxs = a->get_const_col_idxs();
-    auto a_vals = a->get_const_values();
+    auto a_vals = as_device_type(a->get_const_values());
     auto l_row_ptrs = l->get_const_row_ptrs();
     auto l_col_idxs = l->get_const_col_idxs();
-    auto l_vals = l->get_const_values();
+    auto l_vals = as_device_type(l->get_const_values());
     auto l_new_row_ptrs = l_new->get_row_ptrs();
     // count non-zeros per row
     kernel::ict_tri_spgeam_nnz<subgroup_size>(
@@ -428,7 +427,7 @@ void add_candidates(syn::value_list<int, subgroup_size>,
     l_new_builder.get_value_array().resize_and_reset(l_new_nnz);
 
     auto l_new_col_idxs = l_new->get_col_idxs();
-    auto l_new_vals = l_new->get_values();
+    auto l_new_vals = as_device_type(l_new->get_values());
 
     // fill columns and values
     kernel::ict_tri_spgeam_init<subgroup_size>(
@@ -454,9 +453,10 @@ void compute_factor(syn::value_list<int, subgroup_size>,
     auto num_blocks = ceildiv(total_nnz, block_size);
     kernel::ict_sweep<subgroup_size>(
         num_blocks, default_block_size, 0, exec->get_queue(),
-        a->get_const_row_ptrs(), a->get_const_col_idxs(), a->get_const_values(),
-        l->get_const_row_ptrs(), l_coo->get_const_row_idxs(),
-        l->get_const_col_idxs(), l->get_values(),
+        a->get_const_row_ptrs(), a->get_const_col_idxs(),
+        as_device_type(a->get_const_values()), l->get_const_row_ptrs(),
+        l_coo->get_const_row_idxs(), l->get_const_col_idxs(),
+        as_device_type(l->get_values()),
         static_cast<IndexType>(l->get_num_stored_elements()));
 }
 

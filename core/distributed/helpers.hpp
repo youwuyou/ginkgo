@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,12 +8,10 @@
 
 #include <memory>
 
-
 #include <ginkgo/config.hpp>
 #include <ginkgo/core/distributed/matrix.hpp>
 #include <ginkgo/core/distributed/vector.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/base/dispatch_helper.hpp"
 
@@ -154,15 +152,35 @@ template <typename T, typename F, typename... Args>
 auto run_matrix(T* linop, F&& f, Args&&... args)
 {
     using namespace gko::experimental::distributed;
-    return run<Matrix<double, int32, int32>, Matrix<double, int32, int64>,
-               Matrix<double, int64, int64>, Matrix<float, int32, int32>,
-               Matrix<float, int32, int64>, Matrix<float, int64, int64>,
-               Matrix<std::complex<double>, int32, int32>,
-               Matrix<std::complex<double>, int32, int64>,
-               Matrix<std::complex<double>, int64, int64>,
-               Matrix<std::complex<float>, int32, int32>,
-               Matrix<std::complex<float>, int32, int64>,
-               Matrix<std::complex<float>, int64, int64>>(
+    return run<
+        with_same_constness_t<Matrix<double, int32, int32>, T>,
+        with_same_constness_t<Matrix<double, int32, int64>, T>,
+        with_same_constness_t<Matrix<double, int64, int64>, T>,
+        with_same_constness_t<Matrix<float, int32, int32>, T>,
+        with_same_constness_t<Matrix<float, int32, int64>, T>,
+        with_same_constness_t<Matrix<float, int64, int64>, T>,
+#if GINKGO_ENABLE_HALF
+        with_same_constness_t<Matrix<float16, int32, int32>, T>,
+        with_same_constness_t<Matrix<float16, int32, int64>, T>,
+        with_same_constness_t<Matrix<float16, int64, int64>, T>,
+        with_same_constness_t<Matrix<std::complex<float16>, int32, int32>, T>,
+        with_same_constness_t<Matrix<std::complex<float16>, int32, int64>, T>,
+        with_same_constness_t<Matrix<std::complex<float16>, int64, int64>, T>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+        with_same_constness_t<Matrix<bfloat16, int32, int32>, T>,
+        with_same_constness_t<Matrix<bfloat16, int32, int64>, T>,
+        with_same_constness_t<Matrix<bfloat16, int64, int64>, T>,
+        with_same_constness_t<Matrix<std::complex<bfloat16>, int32, int32>, T>,
+        with_same_constness_t<Matrix<std::complex<bfloat16>, int32, int64>, T>,
+        with_same_constness_t<Matrix<std::complex<bfloat16>, int64, int64>, T>,
+#endif
+        with_same_constness_t<Matrix<std::complex<double>, int32, int32>, T>,
+        with_same_constness_t<Matrix<std::complex<double>, int32, int64>, T>,
+        with_same_constness_t<Matrix<std::complex<double>, int64, int64>, T>,
+        with_same_constness_t<Matrix<std::complex<float>, int32, int32>, T>,
+        with_same_constness_t<Matrix<std::complex<float>, int32, int64>, T>,
+        with_same_constness_t<Matrix<std::complex<float>, int64, int64>, T>>(
         linop, std::forward<F>(f), std::forward<Args>(args)...);
 }
 
@@ -170,48 +188,19 @@ auto run_matrix(T* linop, F&& f, Args&&... args)
 #endif
 
 
-/**
- * Helper to extract a submatrix.
- *
- * @note  global_size is unused, since it can be inferred from rows and cols.
- */
-template <typename ValueType>
-std::unique_ptr<matrix::Dense<ValueType>> create_submatrix_helper(
-    matrix::Dense<ValueType>* mtx, dim<2> global_size, span rows, span cols)
+inline const LinOp* get_local(const LinOp* mtx)
 {
-    return mtx->create_submatrix(rows, cols);
-}
-
-
 #if GINKGO_BUILD_MPI
-
-
-/**
- * Helper to extract a submatrix.
- *
- * @param global_size  the global_size of the submatrix
- * @param rows  the rows of the submatrix in local indices
- * @param cols  the columns of the submatrix in local indices
- */
-template <typename ValueType>
-std::unique_ptr<experimental::distributed::Vector<ValueType>>
-create_submatrix_helper(experimental::distributed::Vector<ValueType>* mtx,
-                        dim<2> global_size, span rows, span cols)
-{
-    const auto exec = mtx->get_executor();
-    auto local_view = matrix::Dense<ValueType>::create(
-        exec, mtx->get_local_vector()->get_size(),
-        make_array_view(exec,
-                        mtx->get_local_vector()->get_num_stored_elements(),
-                        mtx->get_local_values()),
-        mtx->get_local_vector()->get_stride());
-    return experimental::distributed::Vector<ValueType>::create(
-        exec, mtx->get_communicator(), global_size,
-        local_view->create_submatrix(rows, cols));
-}
-
-
+    if (is_distributed(mtx)) {
+        return run_matrix(mtx, [](auto concrete) {
+            return concrete->get_local_matrix().get();
+        });
+    }
 #endif
+    {
+        return mtx;
+    }
+}
 
 
 }  // namespace detail

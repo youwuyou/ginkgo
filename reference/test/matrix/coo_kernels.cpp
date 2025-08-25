@@ -1,25 +1,21 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/matrix/coo.hpp>
-
+#include "core/matrix/coo_kernels.hpp"
 
 #include <algorithm>
 #include <memory>
 
-
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/executor.hpp>
+#include <ginkgo/core/matrix/coo.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/matrix/diagonal.hpp>
 
-
-#include "core/matrix/coo_kernels.hpp"
 #include "core/test/utils.hpp"
 
 
@@ -83,15 +79,16 @@ TYPED_TEST(Coo, ConvertsToPrecision)
 {
     using ValueType = typename TestFixture::value_type;
     using IndexType = typename TestFixture::index_type;
-    using OtherType = typename gko::next_precision<ValueType>;
+    using OtherType = gko::next_precision<ValueType>;
     using Coo = typename TestFixture::Mtx;
     using OtherCoo = gko::matrix::Coo<OtherType, IndexType>;
     auto tmp = OtherCoo::create(this->exec);
     auto res = Coo::create(this->exec);
     // If OtherType is more precise: 0, otherwise r
-    auto residual = r<OtherType>::value < r<ValueType>::value
-                        ? gko::remove_complex<ValueType>{0}
-                        : gko::remove_complex<ValueType>{r<OtherType>::value};
+    auto residual =
+        r<OtherType>::value < r<ValueType>::value
+            ? gko::remove_complex<ValueType>{0}
+            : static_cast<gko::remove_complex<ValueType>>(r<OtherType>::value);
 
     this->mtx->convert_to(tmp);
     tmp->convert_to(res);
@@ -104,15 +101,16 @@ TYPED_TEST(Coo, MovesToPrecision)
 {
     using ValueType = typename TestFixture::value_type;
     using IndexType = typename TestFixture::index_type;
-    using OtherType = typename gko::next_precision<ValueType>;
+    using OtherType = gko::next_precision<ValueType>;
     using Coo = typename TestFixture::Mtx;
     using OtherCoo = gko::matrix::Coo<OtherType, IndexType>;
     auto tmp = OtherCoo::create(this->exec);
     auto res = Coo::create(this->exec);
     // If OtherType is more precise: 0, otherwise r
-    auto residual = r<OtherType>::value < r<ValueType>::value
-                        ? gko::remove_complex<ValueType>{0}
-                        : gko::remove_complex<ValueType>{r<OtherType>::value};
+    auto residual =
+        r<OtherType>::value < r<ValueType>::value
+            ? gko::remove_complex<ValueType>{0}
+            : static_cast<gko::remove_complex<ValueType>>(r<OtherType>::value);
 
     this->mtx->move_to(tmp);
     tmp->move_to(res);
@@ -216,7 +214,7 @@ TYPED_TEST(Coo, ConvertsEmptyToPrecision)
 {
     using ValueType = typename TestFixture::value_type;
     using IndexType = typename TestFixture::index_type;
-    using OtherType = typename gko::next_precision<ValueType>;
+    using OtherType = gko::next_precision<ValueType>;
     using Coo = typename TestFixture::Mtx;
     using OtherCoo = gko::matrix::Coo<OtherType, IndexType>;
     auto empty = OtherCoo::create(this->exec);
@@ -233,7 +231,7 @@ TYPED_TEST(Coo, MovesEmptyToPrecision)
 {
     using ValueType = typename TestFixture::value_type;
     using IndexType = typename TestFixture::index_type;
-    using OtherType = typename gko::next_precision<ValueType>;
+    using OtherType = gko::next_precision<ValueType>;
     using Coo = typename TestFixture::Mtx;
     using OtherCoo = gko::matrix::Coo<OtherType, IndexType>;
     auto empty = OtherCoo::create(this->exec);
@@ -902,6 +900,34 @@ TYPED_TEST(Coo, ApplyAddsScaledToMixedComplex)
 }
 
 
+TYPED_TEST(Coo, Transpose)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto transposed_ans = gko::initialize<Mtx>(
+        {I<T>{1.0, 0.0}, I<T>{3.0, 5.0}, I<T>{2.0, 0.0}}, this->exec);
+
+    auto result = gko::as<Mtx>(this->mtx->transpose());
+
+    GKO_ASSERT_MTX_EQ_SPARSITY(result, transposed_ans);
+    GKO_ASSERT_MTX_NEAR(result, transposed_ans, 0.0);
+}
+
+
+TYPED_TEST(Coo, ConjTranspose)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto conj_transposed_ans = gko::initialize<Mtx>(
+        {I<T>{1.0, 0.0}, I<T>{3.0, 5.0}, I<T>{2.0, 0.0}}, this->exec);
+
+    auto result = gko::as<Mtx>(this->mtx->conj_transpose());
+
+    GKO_ASSERT_MTX_EQ_SPARSITY(result, conj_transposed_ans);
+    GKO_ASSERT_MTX_NEAR(result, conj_transposed_ans, 0.0);
+}
+
+
 template <typename ValueIndexType>
 class CooComplex : public ::testing::Test {
 protected:
@@ -953,6 +979,46 @@ TYPED_TEST(CooComplex, InplaceAbsolute)
 
     GKO_ASSERT_MTX_NEAR(
         mtx, l({{1.0, 5.0, 2.0}, {5.0, 1.0, 0.0}, {0.0, 1.5, 2.0}}), 0.0);
+}
+
+
+TYPED_TEST(CooComplex, Transpose)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto exec = gko::ReferenceExecutor::create();
+    auto mtx = gko::initialize<Mtx>({{T{1.0, 1.0}, T{3.0, -1.0}, T{2.0, 2.0}},
+                                     {T{0.0, 0.0}, T{5.0, -3.0}, T{0.0, 0.0}}},
+                                    exec);
+    auto transposed_ans = gko::initialize<Mtx>(
+        {I<T>{T{1.0, 1.0}, T{0.0, 0.0}}, I<T>{T{3.0, -1.0}, T{5.0, -3.0}},
+         I<T>{T{2.0, 2.0}, T{0.0, 0.0}}},
+        exec);
+
+    auto result = gko::as<Mtx>(mtx->transpose());
+
+    GKO_ASSERT_MTX_EQ_SPARSITY(result, transposed_ans);
+    GKO_ASSERT_MTX_NEAR(result, transposed_ans, 0.0);
+}
+
+
+TYPED_TEST(CooComplex, ConjTranspose)
+{
+    using Mtx = typename TestFixture::Mtx;
+    using T = typename TestFixture::value_type;
+    auto exec = gko::ReferenceExecutor::create();
+    auto mtx = gko::initialize<Mtx>({{T{1.0, 1.0}, T{3.0, -1.0}, T{2.0, 2.0}},
+                                     {T{0.0, 0.0}, T{5.0, -3.0}, T{0.0, 0.0}}},
+                                    exec);
+    auto conj_transposed_ans = gko::initialize<Mtx>(
+        {I<T>{T{1.0, -1.0}, T{0.0, 0.0}}, I<T>{T{3.0, 1.0}, T{5.0, 3.0}},
+         I<T>{T{2.0, -2.0}, T{0.0, 0.0}}},
+        exec);
+
+    auto result = gko::as<Mtx>(mtx->conj_transpose());
+
+    GKO_ASSERT_MTX_EQ_SPARSITY(result, conj_transposed_ans);
+    GKO_ASSERT_MTX_NEAR(result, conj_transposed_ans, 0.0);
 }
 
 

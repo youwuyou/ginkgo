@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -9,14 +9,12 @@
 #include <complex>
 #include <string>
 
-
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/config/config.hpp>
 #include <ginkgo/core/config/registry.hpp>
 #include <ginkgo/core/solver/solver_base.hpp>
 #include <ginkgo/core/synthesizer/containers.hpp>
-
 
 #include "core/config/config_helper.hpp"
 #include "core/config/type_descriptor_helper.hpp"
@@ -104,8 +102,18 @@ deferred_factory_parameter<ReturnType> dispatch(
     }
 }
 
-using value_type_list =
+using value_type_list_base =
     syn::type_list<double, float, std::complex<double>, std::complex<float>>;
+
+using value_type_list =
+    syn::type_list<double, float,
+#if GINKGO_ENABLE_HALF
+                   float16, std::complex<float16>,
+#endif
+#if GINKGO_ENABLE_BFLOAT16
+                   bfloat16, std::complex<bfloat16>,
+#endif
+                   std::complex<double>, std::complex<float>>;
 
 using index_type_list = syn::type_list<int32, int64>;
 

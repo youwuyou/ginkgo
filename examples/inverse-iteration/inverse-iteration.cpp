@@ -1,9 +1,6 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
-
-#include <ginkgo/ginkgo.hpp>
-
 
 #include <cmath>
 #include <complex>
@@ -12,6 +9,8 @@
 #include <iostream>
 #include <map>
 #include <string>
+
+#include <ginkgo/ginkgo.hpp>
 
 
 int main(int argc, char* argv[])
@@ -130,7 +129,7 @@ int main(int argc, char* argv[])
         x->scale(clone(exec, inv_norm));
         // g = x^* A x
         A->apply(x, tmp);
-        x->compute_dot(tmp, g);
+        x->compute_conj_dot(tmp, g);
         auto g_val = clone(this_exec, g)->get_values()[0];
         std::cout << "\"eigenvalue\": " << g_val << ", ";
         // ||Ax - gx|| < tol * g

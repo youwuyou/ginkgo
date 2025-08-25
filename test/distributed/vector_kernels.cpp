@@ -1,25 +1,21 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/distributed/vector_kernels.hpp"
 
-
 #include <algorithm>
 #include <memory>
 #include <vector>
 
-
 #include <gtest/gtest-typed-test.h>
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/base/matrix_data.hpp>
 
-
 #include "core/test/utils.hpp"
-#include "test/utils/executor.hpp"
+#include "test/utils/common_fixture.hpp"
 
 
 using comm_index_type = gko::experimental::distributed::comm_index_type;
@@ -61,7 +57,7 @@ protected:
 
             gko::kernels::reference::distributed_vector::build_local(
                 ref, input, partition.get(), part, output.get());
-            gko::kernels::EXEC_NAMESPACE::distributed_vector::build_local(
+            gko::kernels::GKO_DEVICE_NAMESPACE::distributed_vector::build_local(
                 exec, d_input, d_partition.get(), part, d_output.get());
 
             GKO_ASSERT_MTX_NEAR(output, d_output, 0);
@@ -138,9 +134,7 @@ TYPED_TEST(Vector, BuildsLocalSmallIsEquivalentToRef)
             num_rows, num_cols,
             std::uniform_int_distribution<int>(0,
                                                static_cast<int>(num_cols - 1)),
-            std::uniform_real_distribution<gko::remove_complex<value_type>>(0,
-                                                                            1),
-            this->engine, this->ref);
+            std::uniform_real_distribution<>(0, 1), this->engine, this->ref);
     auto partition = gko::experimental::distributed::Partition<
         local_index_type, global_index_type>::build_from_mapping(this->ref,
                                                                  mapping,
@@ -173,9 +167,7 @@ TYPED_TEST(Vector, BuildsLocalIsEquivalentToRef)
             num_rows, num_cols,
             std::uniform_int_distribution<int>(0,
                                                static_cast<int>(num_cols - 1)),
-            std::uniform_real_distribution<gko::remove_complex<value_type>>(0,
-                                                                            1),
-            this->engine, this->ref);
+            std::uniform_real_distribution<>(0, 1), this->engine, this->ref);
     auto partition = gko::experimental::distributed::Partition<
         local_index_type, global_index_type>::build_from_mapping(this->ref,
                                                                  mapping,

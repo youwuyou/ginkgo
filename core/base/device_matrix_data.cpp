@@ -1,14 +1,12 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/base/device_matrix_data.hpp>
-
+#include "ginkgo/core/base/device_matrix_data.hpp"
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/base/temporary_clone.hpp>
-
 
 #include "core/base/device_matrix_data_kernels.hpp"
 
@@ -96,9 +94,20 @@ device_matrix_data<ValueType, IndexType>::create_from_host(
 
 
 template <typename ValueType, typename IndexType>
+void device_matrix_data<ValueType, IndexType>::fill_zero()
+{
+    row_idxs_.fill(0);
+    col_idxs_.fill(0);
+    values_.fill(ValueType{0});
+}
+
+
+template <typename ValueType, typename IndexType>
 void device_matrix_data<ValueType, IndexType>::sort_row_major()
 {
-    this->values_.get_executor()->run(components::make_sort_row_major(*this));
+    this->values_.get_executor()->run(components::make_sort_row_major(
+        this->get_num_stored_elements(), this->get_row_idxs(),
+        this->get_col_idxs(), this->get_values()));
 }
 
 
@@ -149,7 +158,7 @@ device_matrix_data<ValueType, IndexType>::empty_out()
 
 
 #define GKO_DECLARE_DEVICE_MATRIX_DATA(ValueType, IndexType) \
-    struct device_matrix_data<ValueType, IndexType>
+    class device_matrix_data<ValueType, IndexType>
 GKO_INSTANTIATE_FOR_EACH_VALUE_AND_INDEX_TYPE(GKO_DECLARE_DEVICE_MATRIX_DATA);
 
 

@@ -1,6 +1,8 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
+
+#include <string>
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
@@ -12,7 +14,6 @@
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 #include <ginkgo/core/solver/triangular.hpp>
-
 
 #include "core/config/config_helper.hpp"
 #include "core/config/trisolver_config.hpp"
@@ -42,7 +43,9 @@ UpperTrs<ValueType, IndexType>::parse(
     const config::type_descriptor& td_for_child)
 {
     auto params = UpperTrs<ValueType, IndexType>::build();
-    common_trisolver_parse(params, config, context, td_for_child);
+    config::config_check_decorator config_check(config);
+    config::common_trisolver_parse(params, config_check, context, td_for_child);
+
     return params;
 }
 
@@ -100,6 +103,7 @@ std::unique_ptr<LinOp> UpperTrs<ValueType, IndexType>::transpose() const
 {
     return transposed_type::build()
         .with_num_rhs(this->parameters_.num_rhs)
+        .with_algorithm(this->parameters_.algorithm)
         .on(this->get_executor())
         ->generate(share(this->get_system_matrix()->transpose()));
 }
@@ -110,6 +114,7 @@ std::unique_ptr<LinOp> UpperTrs<ValueType, IndexType>::conj_transpose() const
 {
     return transposed_type::build()
         .with_num_rhs(this->parameters_.num_rhs)
+        .with_algorithm(this->parameters_.algorithm)
         .on(this->get_executor())
         ->generate(share(this->get_system_matrix()->conj_transpose()));
 }

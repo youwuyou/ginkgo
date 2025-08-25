@@ -1,9 +1,8 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include <gtest/gtest.h>
-
 
 #include <ginkgo/config.hpp>
 #include <ginkgo/core/distributed/matrix.hpp>
@@ -16,7 +15,6 @@
 #include <ginkgo/core/matrix/fbcsr.hpp>
 #include <ginkgo/core/matrix/hybrid.hpp>
 #include <ginkgo/core/matrix/sellp.hpp>
-
 
 #include "core/test/utils.hpp"
 
@@ -188,9 +186,9 @@ TYPED_TEST(MatrixBuilder, BuildWithLocal)
     using value_type = typename TestFixture::value_type;
     using index_type = typename TestFixture::local_index_type;
     using dist_mat_type = typename TestFixture::dist_mtx_type;
-    this->template forall_matrix_types([this](auto with_matrix_type,
-                                              auto expected_type_ptr,
-                                              auto additional_test) {
+    this->forall_matrix_types([this](auto with_matrix_type,
+                                     auto expected_type_ptr,
+                                     auto additional_test) {
         using expected_type = typename std::remove_pointer<
             decltype(expected_type_ptr.get())>::type;
 
@@ -211,9 +209,9 @@ TYPED_TEST(MatrixBuilder, BuildWithLocalAndNonLocal)
     using value_type = typename TestFixture::value_type;
     using index_type = typename TestFixture::local_index_type;
     using dist_mat_type = typename TestFixture::dist_mtx_type;
-    this->template forall_matrix_types([this](auto with_local_matrix_type,
-                                              auto expected_local_type_ptr,
-                                              auto additional_local_test) {
+    this->forall_matrix_types([this](auto with_local_matrix_type,
+                                     auto expected_local_type_ptr,
+                                     auto additional_local_test) {
         using expected_local_type = typename std::remove_pointer<
             decltype(expected_local_type_ptr.get())>::type;
         this->forall_matrix_types([&](auto with_non_local_matrix_type,
@@ -291,9 +289,9 @@ TYPED_TEST(MatrixBuilder, BuildFromLinOpLocal)
     using value_type = typename TestFixture::value_type;
     using index_type = typename TestFixture::local_index_type;
     using dist_mat_type = typename TestFixture::dist_mtx_type;
-    this->template forall_matrix_types([this](auto with_matrix_type,
-                                              auto expected_type_ptr,
-                                              auto additional_test) {
+    this->forall_matrix_types([this](auto with_matrix_type,
+                                     auto expected_type_ptr,
+                                     auto additional_test) {
         using expected_type = typename std::remove_pointer<
             decltype(expected_type_ptr.get())>::type;
 
@@ -314,9 +312,9 @@ TYPED_TEST(MatrixBuilder, BuildFromLinOpLocalAndNonLocal)
     using value_type = typename TestFixture::value_type;
     using index_type = typename TestFixture::local_index_type;
     using dist_mat_type = typename TestFixture::dist_mtx_type;
-    this->template forall_matrix_types([this](auto with_local_matrix_type,
-                                              auto expected_local_type_ptr,
-                                              auto additional_local_test) {
+    this->forall_matrix_types([this](auto with_local_matrix_type,
+                                     auto expected_local_type_ptr,
+                                     auto additional_local_test) {
         using expected_local_type = typename std::remove_pointer<
             decltype(expected_local_type_ptr.get())>::type;
         this->forall_matrix_types([&](auto with_non_local_matrix_type,

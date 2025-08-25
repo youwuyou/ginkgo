@@ -1,23 +1,22 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/preconditioner/isai_kernels.hpp"
 
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
-
 
 #include "core/components/prefix_sum_kernels.hpp"
 #include "core/matrix/csr_builder.hpp"
 #include "dpcpp/base/config.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
 #include "dpcpp/base/dpct.hpp"
+#include "dpcpp/base/math.hpp"
+#include "dpcpp/base/types.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/merging.dp.hpp"
 #include "dpcpp/components/reduction.dp.hpp"
@@ -65,7 +64,7 @@ __dpct_inline__ void generic_generate(
     IndexType* __restrict__ excess_nnz, Callable direct_solve,
     sycl::nd_item<3> item_ct1,
     uninitialized_array<ValueType, subwarp_size * subwarp_size *
-                                       subwarps_per_block>* storage)
+                                       subwarps_per_block>& storage)
 {
     static_assert(subwarp_size >= row_size_limit, "incompatible subwarp_size");
     const auto row =
@@ -111,9 +110,12 @@ __dpct_inline__ void generic_generate(
         }
 
         // subwarp_size^2 storage per subwarp
+        // before 2024.2, the operation from sycl bfloat16 is too general such
+        // that this pointer shift will have ambiguous issue between built-in
+        // pointer shift and bfloat16 operation.
         auto dense_system_ptr =
-            *storage + (item_ct1.get_local_id(2) / subwarp_size) *
-                           subwarp_size * subwarp_size;
+            &storage[(item_ct1.get_local_id(2) / subwarp_size) * subwarp_size *
+                     subwarp_size];
         // row-major accessor
         auto dense_system = [&](IndexType row, IndexType col) -> ValueType& {
             return dense_system_ptr[row * subwarp_size + col];
@@ -154,10 +156,11 @@ __dpct_inline__ void generic_generate(
                 i_col_idxs + i_row_begin, i_row_size, subwarp,
                 [&](IndexType, IndexType m_idx, IndexType i_idx,
                     config::lane_mask_type, bool valid) {
-                    rhs_one_idx += popcnt(subwarp.ballot(
+                    rhs_one_idx += popcnt(group::ballot(
+                        subwarp,
                         valid &&
-                        i_col_idxs[i_transposed_row_begin + m_idx] < row &&
-                        col == row));
+                            i_col_idxs[i_transposed_row_begin + m_idx] < row &&
+                            col == row));
                 });
         }
 
@@ -199,7 +202,7 @@ void generate_l_inverse(
     IndexType* __restrict__ excess_rhs_sizes,
     IndexType* __restrict__ excess_nnz, sycl::nd_item<3> item_ct1,
     uninitialized_array<ValueType, subwarp_size * subwarp_size *
-                                       subwarps_per_block>* storage)
+                                       subwarps_per_block>& storage)
 {
     auto trs_solve =
         [](IndexType num_elems, const ValueType* __restrict__ local_row,
@@ -252,7 +255,7 @@ void generate_l_inverse(dim3 grid, dim3 block, size_type dynamic_shared_memory,
                     generate_l_inverse<subwarp_size, subwarps_per_block>(
                         num_rows, m_row_ptrs, m_col_idxs, m_values, i_row_ptrs,
                         i_col_idxs, i_values, excess_rhs_sizes, excess_nnz,
-                        item_ct1, storage_acc_ct1.get_pointer().get());
+                        item_ct1, *storage_acc_ct1.get_pointer());
                 });
     });
 }
@@ -269,7 +272,7 @@ void generate_u_inverse(
     IndexType* __restrict__ excess_rhs_sizes,
     IndexType* __restrict__ excess_nnz, sycl::nd_item<3> item_ct1,
     uninitialized_array<ValueType, subwarp_size * subwarp_size *
-                                       subwarps_per_block>* storage)
+                                       subwarps_per_block>& storage)
 {
     auto trs_solve = [](IndexType num_elems,
                         const ValueType* __restrict__ local_row,
@@ -322,7 +325,7 @@ void generate_u_inverse(dim3 grid, dim3 block, size_type dynamic_shared_memory,
                     generate_u_inverse<subwarp_size, subwarps_per_block>(
                         num_rows, m_row_ptrs, m_col_idxs, m_values, i_row_ptrs,
                         i_col_idxs, i_values, excess_rhs_sizes, excess_nnz,
-                        item_ct1, storage_acc_ct1.get_pointer().get());
+                        item_ct1, *storage_acc_ct1.get_pointer());
                 });
     });
 }
@@ -339,7 +342,7 @@ void generate_general_inverse(
     IndexType* __restrict__ excess_rhs_sizes,
     IndexType* __restrict__ excess_nnz, bool spd, sycl::nd_item<3> item_ct1,
     uninitialized_array<ValueType, subwarp_size * subwarp_size *
-                                       subwarps_per_block>* storage)
+                                       subwarps_per_block>& storage)
 {
     auto general_solve = [spd](IndexType num_elems,
                                ValueType* __restrict__ local_row,
@@ -368,7 +371,7 @@ void generate_general_inverse(
 
         if (spd) {
             auto diag = subwarp.shfl(sol, num_elems - 1);
-            sol /= std::sqrt(diag);
+            sol /= gko::sqrt(diag);
         }
 
         return sol;
@@ -404,7 +407,7 @@ void generate_general_inverse(
                     generate_general_inverse<subwarp_size, subwarps_per_block>(
                         num_rows, m_row_ptrs, m_col_idxs, m_values, i_row_ptrs,
                         i_col_idxs, i_values, excess_rhs_sizes, excess_nnz, spd,
-                        item_ct1, storage_acc_ct1.get_pointer().get());
+                        item_ct1, *storage_acc_ct1.get_pointer());
                 });
     });
 }
@@ -534,7 +537,7 @@ void scale_excess_solution(const IndexType* __restrict__ excess_block_ptrs,
         return;
     }
     const auto diag = excess_solution[block_end - 1];
-    const ValueType scal = one<ValueType>() / std::sqrt(diag);
+    const ValueType scal = one<ValueType>() / gko::sqrt(diag);
 
     for (size_type i = block_begin + local_id; i < block_end;
          i += subwarp_size) {
@@ -629,16 +632,20 @@ void generate_tri_inverse(std::shared_ptr<const DefaultExecutor> exec,
             kernel::generate_l_inverse<subwarp_size, subwarps_per_block>(
                 grid, block, 0, exec->get_queue(),
                 static_cast<IndexType>(num_rows), input->get_const_row_ptrs(),
-                input->get_const_col_idxs(), input->get_const_values(),
+                input->get_const_col_idxs(),
+                as_device_type(input->get_const_values()),
                 inverse->get_row_ptrs(), inverse->get_col_idxs(),
-                inverse->get_values(), excess_rhs_ptrs, excess_nz_ptrs);
+                as_device_type(inverse->get_values()), excess_rhs_ptrs,
+                excess_nz_ptrs);
         } else {
             kernel::generate_u_inverse<subwarp_size, subwarps_per_block>(
                 grid, block, 0, exec->get_queue(),
                 static_cast<IndexType>(num_rows), input->get_const_row_ptrs(),
-                input->get_const_col_idxs(), input->get_const_values(),
+                input->get_const_col_idxs(),
+                as_device_type(input->get_const_values()),
                 inverse->get_row_ptrs(), inverse->get_col_idxs(),
-                inverse->get_values(), excess_rhs_ptrs, excess_nz_ptrs);
+                as_device_type(inverse->get_values()), excess_rhs_ptrs,
+                excess_nz_ptrs);
         }
     }
     components::prefix_sum_nonnegative(exec, excess_rhs_ptrs, num_rows + 1);
@@ -664,9 +671,9 @@ void generate_general_inverse(std::shared_ptr<const DefaultExecutor> exec,
         kernel::generate_general_inverse<subwarp_size, subwarps_per_block>(
             grid, block, 0, exec->get_queue(), static_cast<IndexType>(num_rows),
             input->get_const_row_ptrs(), input->get_const_col_idxs(),
-            input->get_const_values(), inverse->get_row_ptrs(),
-            inverse->get_col_idxs(), inverse->get_values(), excess_rhs_ptrs,
-            excess_nz_ptrs, spd);
+            as_device_type(input->get_const_values()), inverse->get_row_ptrs(),
+            inverse->get_col_idxs(), as_device_type(inverse->get_values()),
+            excess_rhs_ptrs, excess_nz_ptrs, spd);
     }
     components::prefix_sum_nonnegative(exec, excess_rhs_ptrs, num_rows + 1);
     components::prefix_sum_nonnegative(exec, excess_nz_ptrs, num_rows + 1);
@@ -694,11 +701,12 @@ void generate_excess_system(std::shared_ptr<const DefaultExecutor> exec,
         kernel::generate_excess_system<subwarp_size>(
             grid, block, 0, exec->get_queue(), static_cast<IndexType>(num_rows),
             input->get_const_row_ptrs(), input->get_const_col_idxs(),
-            input->get_const_values(), inverse->get_const_row_ptrs(),
-            inverse->get_const_col_idxs(), excess_rhs_ptrs, excess_nz_ptrs,
-            excess_system->get_row_ptrs(), excess_system->get_col_idxs(),
-            excess_system->get_values(), excess_rhs->get_values(), e_start,
-            e_end);
+            as_device_type(input->get_const_values()),
+            inverse->get_const_row_ptrs(), inverse->get_const_col_idxs(),
+            excess_rhs_ptrs, excess_nz_ptrs, excess_system->get_row_ptrs(),
+            excess_system->get_col_idxs(),
+            as_device_type(excess_system->get_values()),
+            as_device_type(excess_rhs->get_values()), e_start, e_end);
     }
 }
 
@@ -717,7 +725,7 @@ void scale_excess_solution(std::shared_ptr<const DefaultExecutor> exec,
     if (grid > 0) {
         kernel::scale_excess_solution<subwarp_size>(
             grid, block, 0, exec->get_queue(), excess_block_ptrs,
-            excess_solution->get_values(), e_start, e_end);
+            as_device_type(excess_solution->get_values()), e_start, e_end);
     }
 }
 
@@ -740,8 +748,8 @@ void scatter_excess_solution(std::shared_ptr<const DefaultExecutor> exec,
         kernel::copy_excess_solution<subwarp_size>(
             grid, block, 0, exec->get_queue(), static_cast<IndexType>(num_rows),
             inverse->get_const_row_ptrs(), excess_rhs_ptrs,
-            excess_solution->get_const_values(), inverse->get_values(), e_start,
-            e_end);
+            as_device_type(excess_solution->get_const_values()),
+            as_device_type(inverse->get_values()), e_start, e_end);
     }
 }
 

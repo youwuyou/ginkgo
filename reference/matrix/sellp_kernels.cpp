@@ -1,15 +1,13 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/sellp_kernels.hpp"
 
-
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
-
 
 #include "core/components/prefix_sum_kernels.hpp"
 
@@ -83,7 +81,11 @@ void advanced_spmv(std::shared_ptr<const ReferenceExecutor> exec,
                 break;
             }
             for (size_type j = 0; j < c->get_size()[1]; j++) {
-                c->at(global_row, j) *= vbeta;
+                if (is_nonzero(vbeta)) {
+                    c->at(global_row, j) *= vbeta;
+                } else {
+                    c->at(global_row, j) = zero<ValueType>();
+                }
             }
             for (size_type i = 0; i < slice_lengths[slice]; i++) {
                 auto val = a->val_at(row, slice_sets[slice], i);

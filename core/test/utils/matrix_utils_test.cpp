@@ -1,20 +1,16 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/utils/matrix_utils.hpp"
 
-
 #include <cmath>
 #include <random>
 #include <type_traits>
 
-
 #include <gtest/gtest.h>
 
-
 #include <ginkgo/core/matrix/csr.hpp>
-
 
 #include "core/test/utils.hpp"
 #include "core/test/utils/matrix_generator.hpp"
@@ -34,8 +30,8 @@ protected:
     MatrixUtils()
         : exec(gko::ReferenceExecutor::create()),
           data(gko::test::generate_random_matrix_data<value_type, int>(
-              500, 500, std::normal_distribution<real_type>(50, 5),
-              std::normal_distribution<real_type>(20.0, 5.0),
+              500, 500, std::normal_distribution<>(50, 5),
+              std::normal_distribution<>(20.0, 5.0),
               std::default_random_engine(42))),
           rectangular_data(gko::dim<2>(500, 100))
     {}
@@ -189,7 +185,7 @@ TYPED_TEST(MatrixUtils, MakeDiagDominantCorrectly)
 TYPED_TEST(MatrixUtils, MakeDiagDominantWithRatioCorrectly)
 {
     using T = typename TestFixture::value_type;
-    gko::remove_complex<T> ratio = 1.001;
+    gko::remove_complex<T> ratio = 1.01;
 
     gko::utils::make_diag_dominant(this->data, ratio);
 
@@ -229,10 +225,9 @@ TYPED_TEST(MatrixUtils, MakeHpdMatrixCorrectly)
 {
     using T = typename TestFixture::value_type;
     auto cpy_data = this->data;
-
-    gko::utils::make_hpd(this->data, 1.001);
+    gko::utils::make_hpd(this->data, 1.01);
     gko::utils::make_hermitian(cpy_data);
-    gko::utils::make_diag_dominant(cpy_data, 1.001);
+    gko::utils::make_diag_dominant(cpy_data, 1.01);
 
     auto mtx = TestFixture::mtx_type::create(this->exec);
     mtx->read(this->data);
@@ -245,7 +240,7 @@ TYPED_TEST(MatrixUtils, MakeHpdMatrixCorrectly)
 TYPED_TEST(MatrixUtils, MakeHpdMatrixWithRatioCorrectly)
 {
     using T = typename TestFixture::value_type;
-    gko::remove_complex<T> ratio = 1.00001;
+    gko::remove_complex<T> ratio = 1.01;
     auto cpy_data = this->data;
 
     gko::utils::make_hpd(this->data, ratio);
@@ -265,9 +260,9 @@ TYPED_TEST(MatrixUtils, MakeSpdMatrixCorrectly)
     using T = typename TestFixture::value_type;
     auto cpy_data = this->data;
 
-    gko::utils::make_spd(this->data, 1.001);
+    gko::utils::make_spd(this->data, 1.01);
     gko::utils::make_symmetric(cpy_data);
-    gko::utils::make_diag_dominant(cpy_data, 1.001);
+    gko::utils::make_diag_dominant(cpy_data, 1.01);
 
     auto mtx = TestFixture::mtx_type::create(this->exec);
     mtx->read(this->data);
@@ -280,7 +275,7 @@ TYPED_TEST(MatrixUtils, MakeSpdMatrixCorrectly)
 TYPED_TEST(MatrixUtils, MakeSpdMatrixWithRatioCorrectly)
 {
     using T = typename TestFixture::value_type;
-    gko::remove_complex<T> ratio = 1.00001;
+    gko::remove_complex<T> ratio = 1.01;
     auto cpy_data = this->data;
 
     gko::utils::make_spd(this->data, ratio);

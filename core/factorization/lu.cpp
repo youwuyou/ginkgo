@@ -1,9 +1,8 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/factorization/lu.hpp>
-
+#include "ginkgo/core/factorization/lu.hpp"
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/executor.hpp>
@@ -11,14 +10,11 @@
 #include <ginkgo/core/config/config.hpp>
 #include <ginkgo/core/config/registry.hpp>
 
-
-#include "core/base/array_access.hpp"
 #include "core/components/fill_array_kernels.hpp"
 #include "core/config/config_helper.hpp"
 #include "core/factorization/elimination_forest.hpp"
 #include "core/factorization/lu_kernels.hpp"
 #include "core/factorization/symbolic.hpp"
-#include "core/matrix/csr_kernels.hpp"
 #include "core/matrix/csr_lookup.hpp"
 
 
@@ -29,8 +25,6 @@ namespace {
 
 
 GKO_REGISTER_OPERATION(fill_array, components::fill_array);
-GKO_REGISTER_OPERATION(build_lookup_offsets, csr::build_lookup_offsets);
-GKO_REGISTER_OPERATION(build_lookup, csr::build_lookup);
 GKO_REGISTER_OPERATION(initialize, lu_factorization::initialize);
 GKO_REGISTER_OPERATION(factorize, lu_factorization::factorize);
 GKO_REGISTER_HOST_OPERATION(symbolic_cholesky,
@@ -51,12 +45,12 @@ Lu<ValueType, IndexType>::parse(const config::pnode& config,
 {
     auto params =
         experimental::factorization::Lu<ValueType, IndexType>::build();
-
-    if (auto& obj = config.get("symbolic_factorization")) {
+    config::config_check_decorator config_check(config);
+    if (auto& obj = config_check.get("symbolic_factorization")) {
         params.with_symbolic_factorization(
             config::get_stored_obj<const sparsity_pattern_type>(obj, context));
     }
-    if (auto& obj = config.get("symbolic_algorithm")) {
+    if (auto& obj = config_check.get("symbolic_algorithm")) {
         auto str = obj.get_string();
         if (str == "general") {
             params.with_symbolic_algorithm(symbolic_type::general);
@@ -68,7 +62,7 @@ Lu<ValueType, IndexType>::parse(const config::pnode& config,
             GKO_INVALID_CONFIG_VALUE("symbolic_type", str);
         }
     }
-    if (auto& obj = config.get("skip_sorting")) {
+    if (auto& obj = config_check.get("skip_sorting")) {
         params.with_skip_sorting(config::get_value<bool>(obj));
     }
 
@@ -137,35 +131,18 @@ std::unique_ptr<LinOp> Lu<ValueType, IndexType>::generate_impl(
         factors->set_strategy(factors->get_strategy());
     }
     // setup lookup structure on factors
-    array<IndexType> storage_offsets{exec, num_rows + 1};
-    array<int64> row_descs{exec, num_rows};
+    const auto lookup = matrix::csr::build_lookup(factors.get());
     array<IndexType> diag_idxs{exec, num_rows};
-    const auto allowed_sparsity = gko::matrix::csr::sparsity_type::bitmap |
-                                  gko::matrix::csr::sparsity_type::full |
-                                  gko::matrix::csr::sparsity_type::hash;
-    exec->run(make_build_lookup_offsets(
-        factors->get_const_row_ptrs(), factors->get_const_col_idxs(), num_rows,
-        allowed_sparsity, storage_offsets.get_data()));
-    const auto storage_size =
-        static_cast<size_type>(get_element(storage_offsets, num_rows));
-    array<int32> storage{exec, storage_size};
-    exec->run(make_build_lookup(
-        factors->get_const_row_ptrs(), factors->get_const_col_idxs(), num_rows,
-        allowed_sparsity, storage_offsets.get_const_data(),
-        row_descs.get_data(), storage.get_data()));
-    // initialize factors
-    exec->run(make_fill_array(factors->get_values(),
-                              factors->get_num_stored_elements(),
-                              zero<ValueType>()));
     exec->run(make_initialize(
-        mtx.get(), storage_offsets.get_const_data(), row_descs.get_const_data(),
-        storage.get_const_data(), diag_idxs.get_data(), factors.get()));
+        mtx.get(), lookup.storage_offsets.get_const_data(),
+        lookup.row_descs.get_const_data(), lookup.storage.get_const_data(),
+        diag_idxs.get_data(), factors.get()));
     // run numerical factorization
     array<int> tmp{exec};
-    exec->run(make_factorize(storage_offsets.get_const_data(),
-                             row_descs.get_const_data(),
-                             storage.get_const_data(),
-                             diag_idxs.get_const_data(), factors.get(), tmp));
+    exec->run(make_factorize(
+        lookup.storage_offsets.get_const_data(),
+        lookup.row_descs.get_const_data(), lookup.storage.get_const_data(),
+        diag_idxs.get_const_data(), factors.get(), true, tmp));
     return factorization_type::create_from_combined_lu(std::move(factors));
 }
 

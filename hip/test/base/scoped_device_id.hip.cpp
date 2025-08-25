@@ -1,20 +1,19 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-// force-top: on
+// clang-format off
 // prevent compilation failure related to disappearing assert(...) statements
 #include <hip/hip_runtime.h>
-// force-top: off
-
-
-#include <gtest/gtest.h>
-
-
-#include <ginkgo/core/base/executor.hpp>
+// clang-format on
 
 
 #include "hip/base/scoped_device_id.hip.hpp"
+
+#include <gtest/gtest.h>
+
+#include <ginkgo/core/base/executor.hpp>
+
 #include "hip/test/utils.hip.hpp"
 
 
@@ -31,7 +30,7 @@ TEST_F(ScopedDeviceIdGuard, SetsId)
     gko::detail::hip_scoped_device_id_guard g{new_device_id};
 
     int device_id;
-    hipGetDevice(&device_id);
+    GKO_ASSERT_NO_HIP_ERRORS(hipGetDevice(&device_id));
     ASSERT_EQ(device_id, new_device_id);
 }
 
@@ -46,7 +45,7 @@ TEST_F(ScopedDeviceIdGuard, ResetsId)
     }
 
     int device_id;
-    hipGetDevice(&device_id);
+    GKO_ASSERT_NO_HIP_ERRORS(hipGetDevice(&device_id));
     ASSERT_EQ(device_id, old_device_id);
 }
 

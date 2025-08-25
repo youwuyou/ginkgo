@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -13,15 +13,23 @@
 
 
 #include <ginkgo/core/base/dense_cache.hpp>
+#include <ginkgo/core/base/lin_op.hpp>
 #include <ginkgo/core/base/mpi.hpp>
 #include <ginkgo/core/distributed/base.hpp>
-#include <ginkgo/core/distributed/lin_op.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 
 
 namespace gko {
 namespace experimental {
 namespace distributed {
+namespace detail {
+
+
+template <typename ValueType>
+class VectorCache;
+
+
+}  // namespace detail
 
 
 template <typename LocalIndexType, typename GlobalIndexType>
@@ -57,18 +65,25 @@ class Partition;
  */
 template <typename ValueType = double>
 class Vector
-    : public EnableDistributedLinOp<Vector<ValueType>>,
+    : public EnableLinOp<Vector<ValueType>>,
       public ConvertibleTo<Vector<next_precision<ValueType>>>,
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Vector<next_precision<ValueType, 2>>>,
+#endif
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<Vector<next_precision<ValueType, 3>>>,
+#endif
       public EnableAbsoluteComputation<remove_complex<Vector<ValueType>>>,
       public DistributedBase {
-    friend class EnableDistributedPolymorphicObject<Vector, LinOp>;
+    friend class EnablePolymorphicObject<Vector, LinOp>;
     friend class Vector<to_complex<ValueType>>;
     friend class Vector<remove_complex<ValueType>>;
-    friend class Vector<next_precision<ValueType>>;
+    friend class Vector<previous_precision<ValueType>>;
+    friend class detail::VectorCache<ValueType>;
 
 public:
-    using EnableDistributedLinOp<Vector>::convert_to;
-    using EnableDistributedLinOp<Vector>::move_to;
+    using EnableLinOp<Vector>::convert_to;
+    using EnableLinOp<Vector>::move_to;
     using ConvertibleTo<Vector<next_precision<ValueType>>>::convert_to;
     using ConvertibleTo<Vector<next_precision<ValueType>>>::move_to;
 
@@ -162,6 +177,28 @@ public:
     void convert_to(Vector<next_precision<ValueType>>* result) const override;
 
     void move_to(Vector<next_precision<ValueType>>* result) override;
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+    friend class Vector<previous_precision<ValueType, 2>>;
+    using ConvertibleTo<Vector<next_precision<ValueType, 2>>>::convert_to;
+    using ConvertibleTo<Vector<next_precision<ValueType, 2>>>::move_to;
+
+    void convert_to(
+        Vector<next_precision<ValueType, 2>>* result) const override;
+
+    void move_to(Vector<next_precision<ValueType, 2>>* result) override;
+#endif
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+    friend class Vector<previous_precision<ValueType, 3>>;
+    using ConvertibleTo<Vector<next_precision<ValueType, 3>>>::convert_to;
+    using ConvertibleTo<Vector<next_precision<ValueType, 3>>>::move_to;
+
+    void convert_to(
+        Vector<next_precision<ValueType, 3>>* result) const override;
+
+    void move_to(Vector<next_precision<ValueType, 3>>* result) override;
+#endif
 
     std::unique_ptr<absolute_type> compute_absolute() const override;
 
@@ -472,6 +509,19 @@ public:
      */
     std::unique_ptr<real_type> create_real_view();
 
+    /**
+     * Creates a view of a submatrix of this vector.
+     *
+     * @param rows  The local rows of the submatrix
+     * @param columns  The local columns of the submatrix
+     * @param global_size  The global size of the submatrix
+     *
+     * @return A view of a submatrix.
+     */
+    std::unique_ptr<Vector> create_submatrix(local_span rows,
+                                             local_span columns,
+                                             dim<2> global_size);
+
     size_type get_stride() const noexcept { return local_.get_stride(); }
 
     /**
@@ -512,7 +562,7 @@ public:
      * @note  The data form the local_vector will be moved into the new
      *        distributed vector. You could either move in a std::unique_ptr
      *        directly, copy a local vector with gko::clone, or create a
-     *        unique non-owining view of a given local vector with
+     *        unique non-owning view of a given local vector with
      *        gko::make_dense_view.
      *
      * @param exec  Executor associated with this vector
@@ -535,7 +585,7 @@ public:
      * @note  The data form the local_vector will be moved into the new
      *        distributed vector. You could either move in a std::unique_ptr
      *        directly, copy a local vector with gko::clone, or create a
-     *        unique non-owining view of a given local vector with
+     *        unique non-owning view of a given local vector with
      *        gko::make_dense_view.
      *
      * @param exec  Executor associated with this vector
@@ -632,6 +682,13 @@ protected:
         std::shared_ptr<const Executor> exec, const dim<2>& global_size,
         const dim<2>& local_size, size_type stride) const;
 
+    /**
+     * @copydoc create_submatrix
+     */
+    virtual std::unique_ptr<Vector> create_submatrix_impl(local_span rows,
+                                                          local_span columns,
+                                                          dim<2> global_size);
+
 private:
     local_vector_type local_;
     ::gko::detail::DenseCache<ValueType> host_reduction_buffer_;
@@ -670,6 +727,38 @@ struct conversion_target_helper<experimental::distributed::Vector<ValueType>> {
         return target_type::create(source->get_executor(),
                                    source->get_communicator());
     }
+
+    // Allow to create_empty of the same type
+    // For distributed case, next<next<V>> will be V in the candidate list.
+    // TODO: decide to whether to add this or add condition to the list
+    static std::unique_ptr<target_type> create_empty(const target_type* source)
+    {
+        return target_type::create(source->get_executor(),
+                                   source->get_communicator());
+    }
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+    using snd_source_type =
+        experimental::distributed::Vector<previous_precision<ValueType, 2>>;
+
+    static std::unique_ptr<target_type> create_empty(
+        const snd_source_type* source)
+    {
+        return target_type::create(source->get_executor(),
+                                   source->get_communicator());
+    }
+#endif
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+    using trd_source_type =
+        experimental::distributed::Vector<previous_precision<ValueType, 3>>;
+
+    static std::unique_ptr<target_type> create_empty(
+        const trd_source_type* source)
+    {
+        return target_type::create(source->get_executor(),
+                                   source->get_communicator());
+    }
+#endif
 };
 
 

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,14 +8,11 @@
 
 #include <type_traits>
 
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/executor.hpp>
 #include <ginkgo/core/synthesizer/containers.hpp>
-
 
 #include "core/base/array_access.hpp"
 #include "core/base/types.hpp"
@@ -24,6 +21,7 @@
 #include "dpcpp/base/dim3.dp.hpp"
 #include "dpcpp/base/dpct.hpp"
 #include "dpcpp/base/helper.hpp"
+#include "dpcpp/base/types.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/thread_ids.dp.hpp"
 #include "dpcpp/components/uninitialized_array.hpp"
@@ -82,7 +80,11 @@ __dpct_inline__ int choose_pivot(const Group& group, ValueType local_data,
                                  bool is_pivoted)
 {
     using real = remove_complex<ValueType>;
-    real lmag = is_pivoted ? -one<real>() : abs(local_data);
+    // intel SYCL has unary - operation but only accept non-const reference
+    // before 2025.0.1. Thus, it can not accept the temporary value
+    // one<value_type>(), which is rvalue, such that it converts to float first
+    // then take minus.
+    real lmag = is_pivoted ? static_cast<real>(-one<real>()) : abs(local_data);
     const auto pivot = ::gko::kernels::dpcpp::reduce(
         group, group.thread_rank(), [&](int lidx, int ridx) {
             const auto rmag = group.shfl(lmag, ridx);
@@ -192,8 +194,9 @@ void reduce_add_array(dim3 grid, dim3 block, size_type dynamic_shared_memory,
                       const ValueType* source, ValueType* result)
 {
     queue->submit([&](sycl::handler& cgh) {
-        sycl::local_accessor<
-            uninitialized_array<ValueType, DeviceConfig::block_size>, 0>
+        sycl::local_accessor<uninitialized_array<device_type<ValueType>,
+                                                 DeviceConfig::block_size>,
+                             0>
             block_sum_acc_ct1(cgh);
 
         cgh.parallel_for(
@@ -201,8 +204,8 @@ void reduce_add_array(dim3 grid, dim3 block, size_type dynamic_shared_memory,
             [=](sycl::nd_item<3> item_ct1)
                 [[sycl::reqd_sub_group_size(DeviceConfig::subgroup_size)]] {
                     reduce_add_array<DeviceConfig>(
-                        size, source, result, item_ct1,
-                        *block_sum_acc_ct1.get_pointer());
+                        size, as_device_type(source), as_device_type(result),
+                        item_ct1, *block_sum_acc_ct1.get_pointer());
                 });
     });
 }

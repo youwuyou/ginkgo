@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -12,13 +12,11 @@
 #include <type_traits>
 #include <vector>
 
-
 #include <ginkgo/core/base/types.hpp>
 #include <ginkgo/core/base/utils_helper.hpp>
 
 
 namespace gko {
-
 
 /* Eliminate circular dependencies the hard way */
 template <typename ValueType>
@@ -580,6 +578,45 @@ protected:
         const array<int>& iters, const array<float>& residual_norms) const
     {}
 
+
+#if GINKGO_ENABLE_HALF
+
+
+    /**
+     * Batch solver's event that records the iteration count and the residual
+     * norm.
+     *
+     * @param iters  the array of iteration counts.
+     * @param residual_norms  the array storing the residual norms.
+     */
+    virtual void on_batch_solver_completed(
+        const array<int>& iters,
+        const array<gko::float16>& residual_norms) const
+    {}
+
+
+#endif
+
+
+#if GINKGO_ENABLE_BFLOAT16
+
+
+    /**
+     * Batch solver's event that records the iteration count and the residual
+     * norm.
+     *
+     * @param iters  the array of iteration counts.
+     * @param residual_norms  the array storing the residual norms.
+     */
+    virtual void on_batch_solver_completed(
+        const array<int>& iters,
+        const array<gko::bfloat16>& residual_norms) const
+    {}
+
+
+#endif
+
+
 public:
 #undef GKO_LOGGER_REGISTER_EVENT
 
@@ -797,7 +834,7 @@ private:
     template <size_type Event, typename ConcreteLoggableT>
     struct propagate_log_helper<
         Event, ConcreteLoggableT,
-        xstd::void_t<
+        std::void_t<
             decltype(std::declval<ConcreteLoggableT>().get_executor())>> {
         template <typename... Args>
         static void propagate_log(const ConcreteLoggableT* loggable,

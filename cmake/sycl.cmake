@@ -7,7 +7,7 @@ if(CMAKE_CXX_COMPILER MATCHES "dpcpp|icpx")
     endif()
 endif()
 # If we do not have the config from compiler, try to set components to make it work.
-if(NOT COMMAND add_sycl_to_target) 
+if(NOT COMMAND add_sycl_to_target)
     if(NOT DEFINED SYCL_FLAGS)
         set(SYCL_FLAGS "-fsycl" CACHE STRING "SYCL flags for compiler")
     endif()
@@ -15,19 +15,20 @@ endif()
 
 # Provide a uniform way for those package without add_sycl_to_target
 function(gko_add_sycl_to_target)
+    set(one_value_args TARGET)
+    set(multi_value_args SOURCES)
+    cmake_parse_arguments(
+        SYCL
+        ""
+        "${one_value_args}"
+        "${multi_value_args}"
+        ${ARGN}
+    )
     if(COMMAND add_sycl_to_target)
         add_sycl_to_target(${ARGN})
         return()
     endif()
     # We handle them by adding SYCL_FLAGS to compile and link to the target
-    set(one_value_args TARGET)
-    set(multi_value_args SOURCES)
-    cmake_parse_arguments(SYCL
-        ""
-        "${one_value_args}"
-        "${multi_value_args}"
-        ${ARGN})
     target_compile_options(${SYCL_TARGET} PRIVATE "${SYCL_FLAGS}")
     target_link_options(${SYCL_TARGET} PRIVATE "${SYCL_FLAGS}")
 endfunction()
-

@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/factorization/par_ilu.hpp>
-
+#include "ginkgo/core/factorization/par_ilu.hpp"
 
 #include <memory>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
@@ -16,7 +14,6 @@
 #include <ginkgo/core/config/registry.hpp>
 #include <ginkgo/core/matrix/coo.hpp>
 #include <ginkgo/core/matrix/csr.hpp>
-
 
 #include "core/base/array_access.hpp"
 #include "core/config/config_helper.hpp"
@@ -52,19 +49,20 @@ ParIlu<ValueType, IndexType>::parse(const config::pnode& config,
                                     const config::type_descriptor& td_for_child)
 {
     auto params = factorization::ParIlu<ValueType, IndexType>::build();
-
-    if (auto& obj = config.get("iterations")) {
+    config::config_check_decorator config_check(config);
+    if (auto& obj = config_check.get("iterations")) {
         params.with_iterations(config::get_value<size_type>(obj));
     }
-    if (auto& obj = config.get("skip_sorting")) {
+    if (auto& obj = config_check.get("skip_sorting")) {
         params.with_skip_sorting(config::get_value<bool>(obj));
     }
-    if (auto& obj = config.get("l_strategy")) {
+    if (auto& obj = config_check.get("l_strategy")) {
         params.with_l_strategy(config::get_strategy<matrix_type>(obj));
     }
-    if (auto& obj = config.get("u_strategy")) {
+    if (auto& obj = config_check.get("u_strategy")) {
         params.with_u_strategy(config::get_strategy<matrix_type>(obj));
     }
+
     return params;
 }
 

@@ -1,9 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
-#include <ginkgo/core/solver/bicg.hpp>
+#include "ginkgo/core/solver/bicg.hpp"
 
+#include <string>
 
 #include <ginkgo/core/base/exception.hpp>
 #include <ginkgo/core/base/exception_helpers.hpp>
@@ -12,11 +13,10 @@
 #include <ginkgo/core/base/name_demangling.hpp>
 #include <ginkgo/core/base/precision_dispatch.hpp>
 
-
+#include "core/config/config_helper.hpp"
 #include "core/config/solver_config.hpp"
 #include "core/solver/bicg_kernels.hpp"
 #include "core/solver/solver_boilerplate.hpp"
-
 
 namespace gko {
 namespace solver {
@@ -39,7 +39,9 @@ typename Bicg<ValueType>::parameters_type Bicg<ValueType>::parse(
     const config::type_descriptor& td_for_child)
 {
     auto params = solver::Bicg<ValueType>::build();
-    common_solver_parse(params, config, context, td_for_child);
+    config::config_check_decorator config_check(config);
+    config::common_solver_parse(params, config_check, context, td_for_child);
+
     return params;
 }
 
@@ -126,7 +128,6 @@ void Bicg<ValueType>::apply_dense_impl(const matrix::Dense<ValueType>* dense_b,
     GKO_SOLVER_VECTOR(p2, dense_b);
     GKO_SOLVER_VECTOR(q2, dense_b);
 
-    GKO_SOLVER_SCALAR(alpha, dense_b);
     GKO_SOLVER_SCALAR(beta, dense_b);
     GKO_SOLVER_SCALAR(prev_rho, dense_b);
     GKO_SOLVER_SCALAR(rho, dense_b);
@@ -257,7 +258,7 @@ int workspace_traits<Bicg<ValueType>>::num_arrays(const Solver&)
 template <typename ValueType>
 int workspace_traits<Bicg<ValueType>>::num_vectors(const Solver&)
 {
-    return 14;
+    return 13;
 }
 
 
@@ -266,8 +267,8 @@ std::vector<std::string> workspace_traits<Bicg<ValueType>>::op_names(
     const Solver&)
 {
     return {
-        "r",  "z",     "p",    "q",        "r2",  "z2",  "p2",
-        "q2", "alpha", "beta", "prev_rho", "rho", "one", "minus_one",
+        "r",  "z",    "p",        "q",   "r2",  "z2",        "p2",
+        "q2", "beta", "prev_rho", "rho", "one", "minus_one",
     };
 }
 
@@ -283,7 +284,7 @@ std::vector<std::string> workspace_traits<Bicg<ValueType>>::array_names(
 template <typename ValueType>
 std::vector<int> workspace_traits<Bicg<ValueType>>::scalars(const Solver&)
 {
-    return {alpha, beta, prev_rho, rho};
+    return {beta, prev_rho, rho};
 }
 
 

@@ -1,12 +1,10 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
 #include "core/matrix/coo_kernels.hpp"
 
-
-#include <CL/sycl.hpp>
-
+#include <sycl/sycl.hpp>
 
 #include <ginkgo/core/base/exception_helpers.hpp>
 #include <ginkgo/core/base/math.hpp>
@@ -14,11 +12,12 @@
 #include <ginkgo/core/matrix/csr.hpp>
 #include <ginkgo/core/matrix/dense.hpp>
 
-
 #include "core/matrix/dense_kernels.hpp"
 #include "dpcpp/base/config.hpp"
 #include "dpcpp/base/dim3.dp.hpp"
 #include "dpcpp/base/helper.hpp"
+#include "dpcpp/base/math.hpp"
+#include "dpcpp/base/types.hpp"
 #include "dpcpp/components/atomic.dp.hpp"
 #include "dpcpp/components/cooperative_groups.dp.hpp"
 #include "dpcpp/components/format_conversion.dp.hpp"
@@ -291,25 +290,33 @@ void spmv2(std::shared_ptr<const DpcppExecutor> exec,
     const dim3 coo_block(config::warp_size, warps_in_block, 1);
     const auto nwarps = host_kernel::calculate_nwarps(exec, nnz);
 
-    if (nwarps > 0) {
+    if (nwarps <= 0 || b_ncols <= 0) {
+        return;
+    }
+    // not support 16 bit atomic
+    if constexpr (sizeof(remove_complex<ValueType>) == sizeof(int16)) {
+        GKO_NOT_SUPPORTED(c);
+    } else {
         if (b_ncols < 4) {
             const dim3 coo_grid(ceildiv(nwarps, warps_in_block), b_ncols);
             int num_lines = ceildiv(nnz, nwarps * config::warp_size);
             abstract_spmv(coo_grid, coo_block, 0, exec->get_queue(), nnz,
-                          num_lines, a->get_const_values(),
+                          num_lines, as_device_type(a->get_const_values()),
                           a->get_const_col_idxs(), a->get_const_row_idxs(),
-                          b->get_const_values(), b->get_stride(),
-                          c->get_values(), c->get_stride());
+                          as_device_type(b->get_const_values()),
+                          b->get_stride(), as_device_type(c->get_values()),
+                          c->get_stride());
         } else {
             int num_elems =
                 ceildiv(nnz, nwarps * config::warp_size) * config::warp_size;
             const dim3 coo_grid(ceildiv(nwarps, warps_in_block),
                                 ceildiv(b_ncols, config::warp_size));
             abstract_spmm(coo_grid, coo_block, 0, exec->get_queue(), nnz,
-                          num_elems, a->get_const_values(),
+                          num_elems, as_device_type(a->get_const_values()),
                           a->get_const_col_idxs(), a->get_const_row_idxs(),
-                          b_ncols, b->get_const_values(), b->get_stride(),
-                          c->get_values(), c->get_stride());
+                          b_ncols, as_device_type(b->get_const_values()),
+                          b->get_stride(), as_device_type(c->get_values()),
+                          c->get_stride());
         }
     }
 }
@@ -329,26 +336,35 @@ void advanced_spmv2(std::shared_ptr<const DpcppExecutor> exec,
     const dim3 coo_block(config::warp_size, warps_in_block, 1);
     const auto b_ncols = b->get_size()[1];
 
-    if (nwarps > 0) {
+    if (nwarps <= 0 || b_ncols <= 0) {
+        return;
+    }
+    // not support 16 bit atomic
+    if constexpr (sizeof(remove_complex<ValueType>) == sizeof(int16)) {
+        GKO_NOT_SUPPORTED(c);
+    } else {
         if (b_ncols < 4) {
             int num_lines = ceildiv(nnz, nwarps * config::warp_size);
             const dim3 coo_grid(ceildiv(nwarps, warps_in_block), b_ncols);
             abstract_spmv(coo_grid, coo_block, 0, exec->get_queue(), nnz,
-                          num_lines, alpha->get_const_values(),
-                          a->get_const_values(), a->get_const_col_idxs(),
-                          a->get_const_row_idxs(), b->get_const_values(),
-                          b->get_stride(), c->get_values(), c->get_stride());
+                          num_lines, as_device_type(alpha->get_const_values()),
+                          as_device_type(a->get_const_values()),
+                          a->get_const_col_idxs(), a->get_const_row_idxs(),
+                          as_device_type(b->get_const_values()),
+                          b->get_stride(), as_device_type(c->get_values()),
+                          c->get_stride());
         } else {
             int num_elems =
                 ceildiv(nnz, nwarps * config::warp_size) * config::warp_size;
             const dim3 coo_grid(ceildiv(nwarps, warps_in_block),
                                 ceildiv(b_ncols, config::warp_size));
             abstract_spmm(coo_grid, coo_block, 0, exec->get_queue(), nnz,
-                          num_elems, alpha->get_const_values(),
-                          a->get_const_values(), a->get_const_col_idxs(),
-                          a->get_const_row_idxs(), b_ncols,
-                          b->get_const_values(), b->get_stride(),
-                          c->get_values(), c->get_stride());
+                          num_elems, as_device_type(alpha->get_const_values()),
+                          as_device_type(a->get_const_values()),
+                          a->get_const_col_idxs(), a->get_const_row_idxs(),
+                          b_ncols, as_device_type(b->get_const_values()),
+                          b->get_stride(), as_device_type(c->get_values()),
+                          c->get_stride());
         }
     }
 }

@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: 2017 - 2024 The Ginkgo authors
+// SPDX-FileCopyrightText: 2017 - 2025 The Ginkgo authors
 //
 // SPDX-License-Identifier: BSD-3-Clause
 
@@ -8,7 +8,6 @@
 
 #include <initializer_list>
 #include <vector>
-
 
 #include <ginkgo/core/base/array.hpp>
 #include <ginkgo/core/base/batch_dim.hpp>
@@ -53,10 +52,16 @@ template <typename ValueType = default_precision>
 class MultiVector
     : public EnablePolymorphicObject<MultiVector<ValueType>>,
       public EnablePolymorphicAssignment<MultiVector<ValueType>>,
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<MultiVector<next_precision<ValueType, 2>>>,
+#endif
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+      public ConvertibleTo<MultiVector<next_precision<ValueType, 3>>>,
+#endif
       public ConvertibleTo<MultiVector<next_precision<ValueType>>> {
     friend class EnablePolymorphicObject<MultiVector>;
     friend class MultiVector<to_complex<ValueType>>;
-    friend class MultiVector<next_precision<ValueType>>;
+    friend class MultiVector<previous_precision<ValueType>>;
 
 public:
     using EnablePolymorphicAssignment<MultiVector>::convert_to;
@@ -83,6 +88,28 @@ public:
         MultiVector<next_precision<ValueType>>* result) const override;
 
     void move_to(MultiVector<next_precision<ValueType>>* result) override;
+
+#if GINKGO_ENABLE_HALF || GINKGO_ENABLE_BFLOAT16
+    friend class MultiVector<previous_precision<ValueType, 2>>;
+    using ConvertibleTo<MultiVector<next_precision<ValueType, 2>>>::convert_to;
+    using ConvertibleTo<MultiVector<next_precision<ValueType, 2>>>::move_to;
+
+    void convert_to(
+        MultiVector<next_precision<ValueType, 2>>* result) const override;
+
+    void move_to(MultiVector<next_precision<ValueType, 2>>* result) override;
+#endif
+
+#if GINKGO_ENABLE_HALF && GINKGO_ENABLE_BFLOAT16
+    friend class MultiVector<previous_precision<ValueType, 3>>;
+    using ConvertibleTo<MultiVector<next_precision<ValueType, 3>>>::convert_to;
+    using ConvertibleTo<MultiVector<next_precision<ValueType, 3>>>::move_to;
+
+    void convert_to(
+        MultiVector<next_precision<ValueType, 3>>* result) const override;
+
+    void move_to(MultiVector<next_precision<ValueType, 3>>* result) override;
+#endif
 
     /**
      * Creates a mutable view (of matrix::Dense type) of one item of the Batch
